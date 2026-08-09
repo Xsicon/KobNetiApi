@@ -1,0 +1,6 @@
+@Sominnercore.SupportApi_HostAddress = http://localhost:5241
+
+GET {{Sominnercore.SupportApi_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
