@@ -25,10 +25,7 @@ public class BridgingSupportCountsService : ISupportCountsService
             tenantId, "api/Help/admin/stats", HttpMethod.Get, mintAdminToken: true);
 
         if (!sessions.Success && !stats.Success)
-        {
-            return Response<SupportCountsDTO>.Fail(
-                sessions.Message != string.Empty ? sessions.Message : stats.Message);
-        }
+            return await _local.GetCountsAsync(tenantId);
 
         var activeChats = sessions.Success ? sessions.Data?.Count ?? 0 : 0;
         var openTickets = stats.Success

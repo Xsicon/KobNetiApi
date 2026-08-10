@@ -15,6 +15,7 @@ public class UpstreamApiClient
 {
     private readonly ITenantResolver _tenants;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IHostEnvironment _env;
     private readonly ILogger<UpstreamApiClient> _logger;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -25,10 +26,12 @@ public class UpstreamApiClient
     public UpstreamApiClient(
         ITenantResolver tenants,
         IHttpClientFactory httpClientFactory,
+        IHostEnvironment env,
         ILogger<UpstreamApiClient> logger)
     {
         _tenants = tenants;
         _httpClientFactory = httpClientFactory;
+        _env = env;
         _logger = logger;
     }
 
@@ -40,6 +43,10 @@ public class UpstreamApiClient
             return false;
 
         if (string.IsNullOrWhiteSpace(tenant.UpstreamApiBaseUrl))
+            return false;
+
+        // Production must not bridge to a developer machine.
+        if (!_env.IsDevelopment() && IsLoopbackUrl(tenant.UpstreamApiBaseUrl))
             return false;
 
         baseUrl = tenant.UpstreamApiBaseUrl.TrimEnd('/') + "/";
@@ -78,11 +85,21 @@ public class UpstreamApiClient
                 req.Content = JsonContent.Create(body);
 
             using var res = await client.SendAsync(req);
-            var payload = await res.Content.ReadFromJsonAsync<Response<T>>(JsonOptions);
-            if (payload is not null)
-                return payload;
-
             var raw = await res.Content.ReadAsStringAsync();
+            if (!string.IsNullOrWhiteSpace(raw))
+            {
+                try
+                {
+                    var payload = JsonSerializer.Deserialize<Response<T>>(raw, JsonOptions);
+                    if (payload is not null)
+                        return payload;
+                }
+                catch (JsonException)
+                {
+                    // fall through to status-based error
+                }
+            }
+
             _logger.LogWarning(
                 "Upstream {Path} returned {Status}: {Body}",
                 relativePath, (int)res.StatusCode, raw);
@@ -94,6 +111,16 @@ public class UpstreamApiClient
             _logger.LogError(ex, "Upstream forward failed for {Tenant} {Path}", tenantId, relativePath);
             return Response<T>.Fail($"Unable to reach upstream: {ex.Message}");
         }
+    }
+
+    private static bool IsLoopbackUrl(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return false;
+        return uri.IsLoopback
+               || string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(uri.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(uri.Host, "::1", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string MintUpstreamAdminToken(string jwtSecret, Guid? preferredUserId = null)

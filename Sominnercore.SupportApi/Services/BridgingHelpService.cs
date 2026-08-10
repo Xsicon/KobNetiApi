@@ -70,10 +70,15 @@ public class BridgingHelpService : IHelpService
                 tenantId, $"api/Help/admin/tickets/{ticketId}/assign-me", HttpMethod.Post)
             : _local.AssignTicketToMeAsync(tenantId, ticketId, userId, userName);
 
-    public Task<Response<TicketStatsDTO>> GetTicketStatsAsync(string tenantId) =>
-        UseUpstream(tenantId)
-            ? _upstream.ForwardAsync<TicketStatsDTO>(tenantId, "api/Help/admin/stats", HttpMethod.Get)
-            : _local.GetTicketStatsAsync(tenantId);
+    public async Task<Response<TicketStatsDTO>> GetTicketStatsAsync(string tenantId)
+    {
+        if (!UseUpstream(tenantId))
+            return await _local.GetTicketStatsAsync(tenantId);
+
+        var upstream = await _upstream.ForwardAsync<TicketStatsDTO>(
+            tenantId, "api/Help/admin/stats", HttpMethod.Get);
+        return upstream.Success ? upstream : await _local.GetTicketStatsAsync(tenantId);
+    }
 
     public Task<Response<PaginatedResponse<HelpArticleDTO>>> GetPublishedArticlesAsync(
         string tenantId, string? category, string? search, int page, int pageSize)
