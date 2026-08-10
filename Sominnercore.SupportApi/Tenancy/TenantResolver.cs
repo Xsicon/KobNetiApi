@@ -60,6 +60,8 @@ public class TenantResolver : ITenantResolver
         TenantId = id,
         DisplayName = cfg.DisplayName,
         PublicKey = cfg.PublicKey,
-        JwtSecret = cfg.JwtSecret
+        JwtSecret = cfg.JwtSecret,
+        UpstreamApiBaseUrl = cfg.UpstreamApiBaseUrl,
+        PublicHelpCenterUrl = cfg.PublicHelpCenterUrl
     };
 }

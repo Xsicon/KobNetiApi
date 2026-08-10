@@ -40,10 +40,14 @@ else
     builder.Services.AddSingleton<ISupportStore, SupabaseSupportStore>();
 }
 
-builder.Services.AddScoped<IChatService, ChatService>();
-builder.Services.AddScoped<IHelpService, HelpService>();
+builder.Services.AddSingleton<UpstreamApiClient>();
+builder.Services.AddScoped<ChatService>();
+builder.Services.AddScoped<IChatService, BridgingChatService>();
+builder.Services.AddScoped<HelpService>();
+builder.Services.AddScoped<IHelpService, BridgingHelpService>();
 builder.Services.AddScoped<IMacroService, MacroService>();
-builder.Services.AddScoped<ISupportCountsService, SupportCountsService>();
+builder.Services.AddScoped<SupportCountsService>();
+builder.Services.AddScoped<ISupportCountsService, BridgingSupportCountsService>();
 builder.Services.AddScoped<IAgentTokenService, AgentTokenService>();
 
 builder.Services
@@ -64,9 +68,45 @@ builder.Services.AddCors(options =>
 });
 
 builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(options =>
+{
+    options.SwaggerDoc("v1", new()
+    {
+        Title = "Som Inner Core Support API",
+        Version = "v1",
+        Description = "Multi-tenant Chat/Help Support API. Most routes require header X-Tenant-Key."
+    });
+    options.AddSecurityDefinition("Bearer", new()
+    {
+        Description = "Agent JWT: Bearer {token}",
+        Name = "Authorization",
+        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
+        Type = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT"
+    });
+    options.AddSecurityDefinition("TenantKey", new()
+    {
+        Description = "Public tenant key (e.g. pk_muuqwear_dev_public)",
+        Name = "X-Tenant-Key",
+        In = Microsoft.OpenApi.Models.ParameterLocation.Header,
+        Type = Microsoft.OpenApi.Models.SecuritySchemeType.ApiKey
+    });
+});
 builder.Services.AddHealthChecks();
 
 var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI(options =>
+    {
+        options.SwaggerEndpoint("/swagger/v1/swagger.json", "Support API v1");
+        options.RoutePrefix = "swagger";
+    });
+}
 
 app.UseCors();
 app.UseMiddleware<TenantMiddleware>();

@@ -34,12 +34,18 @@ public class SupportController : ApiControllerBase
         HandleResponse(await _counts.GetCountsAsync(RequireTenantId(_tenant)));
 
     [HttpGet("tenants")]
-    public ActionResult<Response<object>> GetTenants()
+    public ActionResult<Response<List<SupportTenantDTO>>> GetTenants()
     {
         var list = _resolver.ListEnabled()
-            .Select(t => new { t.TenantId, t.DisplayName, t.PublicKey })
+            .Select(t => new SupportTenantDTO
+            {
+                TenantId = t.TenantId,
+                DisplayName = t.DisplayName,
+                PublicKey = t.PublicKey,
+                PublicHelpCenterUrl = t.PublicHelpCenterUrl
+            })
             .ToList();
-        return Ok(Response<object>.SuccessResponse(list, "Tenants loaded"));
+        return Ok(Response<List<SupportTenantDTO>>.SuccessResponse(list, "Tenants loaded"));
     }
 
     [HttpGet("macros")]

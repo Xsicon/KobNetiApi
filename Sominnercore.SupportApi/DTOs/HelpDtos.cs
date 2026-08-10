@@ -195,6 +195,14 @@ public class SupportCountsDTO
     public int OpenTickets { get; set; }
 }
 
+public class SupportTenantDTO
+{
+    public string TenantId { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string PublicKey { get; set; } = string.Empty;
+    public string PublicHelpCenterUrl { get; set; } = string.Empty;
+}
+
 public class SupportMacroDTO
 {
     public Guid Id { get; set; }
