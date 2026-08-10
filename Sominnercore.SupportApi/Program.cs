@@ -113,12 +113,19 @@ app.UseExceptionHandler(err =>
 {
     err.Run(async context =>
     {
+        var feature = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>();
+        var message = feature?.Error?.Message ?? "An unexpected error occurred.";
+        var logger = context.RequestServices.GetService<ILoggerFactory>()
+            ?.CreateLogger("ExceptionHandler");
+        logger?.LogError(feature?.Error, "Unhandled exception on {Method} {Path}",
+            context.Request.Method, context.Request.Path);
+
         context.Response.StatusCode = StatusCodes.Status500InternalServerError;
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsJsonAsync(new
         {
             success = false,
-            message = "An unexpected error occurred."
+            message
         });
     });
 });
@@ -127,6 +134,20 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 app.MapHealthChecks("/health");
+app.MapGet("/health/store", (IConfiguration config, ISupportStore store) =>
+{
+    var hasServiceRole = !string.IsNullOrWhiteSpace(config["Supabase:ServiceRoleKey"]);
+    var useInMemoryFlag = string.Equals(
+        config["Support:UseInMemoryStore"], "true", StringComparison.OrdinalIgnoreCase);
+    return Results.Ok(new
+    {
+        store = store.GetType().Name,
+        useInMemoryFlag,
+        hasServiceRoleKey = hasServiceRole,
+        schema = config["Supabase:Schema"] ?? "sominnercore",
+        supabaseUrl = config["Supabase:Url"]
+    });
+});
 
 app.Run();
 

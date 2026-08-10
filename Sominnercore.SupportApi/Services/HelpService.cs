@@ -201,13 +201,20 @@ public class HelpService : IHelpService
 
     public async Task<Response<TicketStatsDTO>> GetTicketStatsAsync(string tenantId)
     {
-        var stats = await _store.GetTicketStatsAsync(tenantId);
-        return Response<TicketStatsDTO>.SuccessResponse(new TicketStatsDTO
+        try
         {
-            OpenCount = stats.OpenCount,
-            InProgressCount = stats.InProgressCount,
-            TotalCount = stats.TotalCount
-        }, "Stats loaded");
+            var stats = await _store.GetTicketStatsAsync(tenantId);
+            return Response<TicketStatsDTO>.SuccessResponse(new TicketStatsDTO
+            {
+                OpenCount = stats.OpenCount,
+                InProgressCount = stats.InProgressCount,
+                TotalCount = stats.TotalCount
+            }, "Stats loaded");
+        }
+        catch (Exception ex)
+        {
+            return Response<TicketStatsDTO>.Fail($"Unable to load stats: {ex.Message}");
+        }
     }
 
     public async Task<Response<PaginatedResponse<HelpArticleDTO>>> GetPublishedArticlesAsync(

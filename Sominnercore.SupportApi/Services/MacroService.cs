@@ -83,17 +83,30 @@ public interface ISupportCountsService
 public class SupportCountsService : ISupportCountsService
 {
     private readonly ISupportStore _store;
+    private readonly ILogger<SupportCountsService> _logger;
 
-    public SupportCountsService(ISupportStore store) => _store = store;
+    public SupportCountsService(ISupportStore store, ILogger<SupportCountsService> logger)
+    {
+        _store = store;
+        _logger = logger;
+    }
 
     public async Task<Response<SupportCountsDTO>> GetCountsAsync(string tenantId)
     {
-        var activeChats = await _store.CountActiveChatsAsync(tenantId);
-        var openTickets = await _store.CountOpenTicketsAsync(tenantId);
-        return Response<SupportCountsDTO>.SuccessResponse(new SupportCountsDTO
+        try
         {
-            ActiveChats = activeChats,
-            OpenTickets = openTickets
-        }, "Counts loaded");
+            var activeChats = await _store.CountActiveChatsAsync(tenantId);
+            var openTickets = await _store.CountOpenTicketsAsync(tenantId);
+            return Response<SupportCountsDTO>.SuccessResponse(new SupportCountsDTO
+            {
+                ActiveChats = activeChats,
+                OpenTickets = openTickets
+            }, "Counts loaded");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GetCountsAsync failed for {Tenant}", tenantId);
+            return Response<SupportCountsDTO>.Fail($"Unable to load counts: {ex.Message}");
+        }
     }
 }
