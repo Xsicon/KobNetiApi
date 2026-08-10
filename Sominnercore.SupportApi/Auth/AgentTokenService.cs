@@ -59,7 +59,15 @@ public class AgentTokenService : IAgentTokenService
 
             using var res = await client.SendAsync(req);
             if (!res.IsSuccessStatusCode)
-                return (false, null, "Invalid Supabase session.");
+            {
+                var detail = await res.Content.ReadAsStringAsync();
+                if (detail.Length > 180)
+                    detail = detail[..180];
+                return (false, null,
+                    string.IsNullOrWhiteSpace(detail)
+                        ? $"Invalid Supabase session ({(int)res.StatusCode})."
+                        : $"Invalid Supabase session ({(int)res.StatusCode}): {detail}");
+            }
 
             await using var stream = await res.Content.ReadAsStreamAsync();
             using var doc = await JsonDocument.ParseAsync(stream);
@@ -71,7 +79,8 @@ public class AgentTokenService : IAgentTokenService
 
             var isAdmin = IsAdminFromUserJson(root) || IsCoreAdminEmail(email);
             if (!isAdmin)
-                return (false, null, "User is not a Core admin.");
+                return (false, null,
+                    $"User is not a Core admin ({email}). Set Support:CoreAdminEmails on the API or app_metadata.role=admin.");
 
             var token = CreateAgentToken(userId, email, AdminRoles.Admin, email);
             return (true, token, null);
