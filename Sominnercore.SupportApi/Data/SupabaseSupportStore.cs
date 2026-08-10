@@ -138,7 +138,7 @@ public class SupabaseSupportStore : ISupportStore
         var response = await _client.From<SbTicket>()
             .Filter("tenant_id", Operator.Equals, tenantId)
             .Get();
-        var items = response.Models;
+        var items = response.Models ?? [];
         return new TicketStatsSnapshot(
             items.Count(t => t.Status == "open"),
             items.Count(t => t.Status == "in_progress"),
@@ -150,7 +150,7 @@ public class SupabaseSupportStore : ISupportStore
         var response = await _client.From<SbTicket>()
             .Filter("tenant_id", Operator.Equals, tenantId)
             .Get();
-        return response.Models.Count(t => t.Status == "open" || t.Status == "in_progress");
+        return (response.Models ?? []).Count(t => t.Status == "open" || t.Status == "in_progress");
     }
 
     public async Task<int> NextTicketSequenceAsync(string tenantId)
