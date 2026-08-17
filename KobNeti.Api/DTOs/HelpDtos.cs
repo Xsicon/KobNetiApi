@@ -203,6 +203,19 @@ public class SupportTenantDTO
     public string PublicHelpCenterUrl { get; set; } = string.Empty;
 }
 
+public class ProductDTO
+{
+    public Guid Id { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string ProductType { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string SupportTier { get; set; } = string.Empty;
+    public string PublicKey { get; set; } = string.Empty;
+    public string PublicHelpCenterUrl { get; set; } = string.Empty;
+    public bool Enabled { get; set; }
+}
+
 public class SupportMacroDTO
 {
     public Guid Id { get; set; }

@@ -15,8 +15,16 @@ Multi-tenant **ops** backend for KobNeti staff (support hub first; more modules 
 |------|------|
 | `KobNeti.Api/` | ASP.NET Core Web API (`net9.0`) |
 | `KobNeti.Api.Tests/` | Tenant isolation tests |
-| `supabase/support_schema.sql` | Tables in schema `sominnercore` |
+| `supabase/support_schema.sql` | Support tables in schema `sominnercore` |
+| `supabase/products_registry.sql` | Product Registry (`products`) + seed |
 | `docs/support-muuqwear-cutover.md` | MuuqWear cutover + auth headers |
+
+## Product Registry
+
+- `GET /api/products` — enabled products (admin JWT + `X-Tenant-Key`)
+- `GET /api/Support/tenants` — same list shape the Hub already uses
+- Resolution: DB `sominnercore.products` when Supabase is configured; otherwise `Support:Tenants` config
+- Secrets (`JwtSecret`, optional `UpstreamApiBaseUrl`) can still override from env/config
 
 ## Run locally
 

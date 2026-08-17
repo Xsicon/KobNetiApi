@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using KobNeti.Api.Auth;
 using KobNeti.Api.Data;
+using KobNeti.Api.Products;
 using KobNeti.Api.Services;
 using KobNeti.Api.Tenancy;
 using Supabase;
@@ -10,7 +11,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.Configure<SupportOptions>(builder.Configuration.GetSection(SupportOptions.SectionName));
 builder.Services.AddSingleton<ITenantContextAccessor, TenantContextAccessor>();
-builder.Services.AddSingleton<ITenantResolver, TenantResolver>();
+builder.Services.AddSingleton<InMemoryProductRegistry>();
 builder.Services.AddHttpClient();
 
 var supportOptions = builder.Configuration.GetSection(SupportOptions.SectionName).Get<SupportOptions>() ?? new SupportOptions();
@@ -20,6 +21,7 @@ var useInMemory = supportOptions.UseInMemoryStore
 if (useInMemory)
 {
     builder.Services.AddSingleton<ISupportStore, InMemorySupportStore>();
+    builder.Services.AddSingleton<IProductRegistry>(sp => sp.GetRequiredService<InMemoryProductRegistry>());
 }
 else
 {
@@ -38,7 +40,10 @@ else
         return client;
     });
     builder.Services.AddSingleton<ISupportStore, SupabaseSupportStore>();
+    builder.Services.AddSingleton<IProductRegistry, SupabaseProductRegistry>();
 }
+
+builder.Services.AddSingleton<ITenantResolver, ProductTenantResolver>();
 
 builder.Services.AddSingleton<UpstreamApiClient>();
 builder.Services.AddScoped<ChatService>();
@@ -134,7 +139,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 app.MapHealthChecks("/health");
-app.MapGet("/health/store", (IConfiguration config, ISupportStore store) =>
+app.MapGet("/health/store", (IConfiguration config, ISupportStore store, IProductRegistry products) =>
 {
     var hasServiceRole = !string.IsNullOrWhiteSpace(config["Supabase:ServiceRoleKey"]);
     var useInMemoryFlag = string.Equals(
@@ -142,6 +147,7 @@ app.MapGet("/health/store", (IConfiguration config, ISupportStore store) =>
     return Results.Ok(new
     {
         store = store.GetType().Name,
+        productRegistry = products.GetType().Name,
         useInMemoryFlag,
         hasServiceRoleKey = hasServiceRole,
         schema = config["Supabase:Schema"] ?? "sominnercore",
