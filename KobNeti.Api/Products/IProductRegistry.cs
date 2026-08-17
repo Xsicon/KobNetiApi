@@ -22,4 +22,31 @@ public interface IProductRegistry
     Task<IReadOnlyList<ProductRecord>> ListEnabledAsync(CancellationToken ct = default);
     Task<ProductRecord?> GetBySlugAsync(string slug, CancellationToken ct = default);
     Task<ProductRecord?> GetByPublicKeyAsync(string publicKey, CancellationToken ct = default);
+    Task<ProductRecord?> RotatePublicKeyAsync(string slug, CancellationToken ct = default);
+}
+
+public static class EmbedKeyHelper
+{
+    public static string GeneratePublicKey(string slug)
+    {
+        var safe = string.Join("", (slug ?? "product")
+            .Trim()
+            .ToLowerInvariant()
+            .Where(ch => char.IsLetterOrDigit(ch) || ch == '-'));
+        if (string.IsNullOrWhiteSpace(safe))
+            safe = "product";
+        return $"pk_{safe}_{Guid.NewGuid():N}";
+    }
+
+    public static string BuildWidgetSnippet(string publicKey, string apiBaseUrl = "https://YOUR-KOBNETI-API.onrender.com")
+    {
+        var baseUrl = (apiBaseUrl ?? "").TrimEnd('/');
+        return $$"""
+               <script
+                 src="{{baseUrl}}/widget/support.js"
+                 data-tenant-key="{{publicKey}}"
+                 data-api-base="{{baseUrl}}"
+                 async></script>
+               """;
+    }
 }

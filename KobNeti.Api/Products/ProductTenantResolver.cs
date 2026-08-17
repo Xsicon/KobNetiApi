@@ -39,6 +39,15 @@ public class ProductTenantResolver : ITenantResolver
 
     public IReadOnlyList<TenantContext> ListEnabled() => Snapshot();
 
+    public void InvalidateCache()
+    {
+        lock (_gate)
+        {
+            _cacheAt = DateTime.MinValue;
+            _cache = [];
+        }
+    }
+
     private List<TenantContext> Snapshot()
     {
         lock (_gate)

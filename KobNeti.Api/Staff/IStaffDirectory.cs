@@ -35,4 +35,8 @@ public class StaffAccessRecord
 public interface IStaffDirectory
 {
     Task<StaffAccessRecord?> FindByEmailAsync(string email, CancellationToken ct = default);
+    Task<IReadOnlyList<StaffAccessRecord>> ListAsync(CancellationToken ct = default);
+    Task<StaffAccessRecord> InviteAsync(string email, string? displayName, string role, IReadOnlyList<string> productSlugs, CancellationToken ct = default);
+    Task<StaffAccessRecord?> SetActiveAsync(Guid staffId, bool active, CancellationToken ct = default);
+    Task<StaffAccessRecord?> SetProductAccessAsync(Guid staffId, IReadOnlyList<string> productSlugs, CancellationToken ct = default);
 }

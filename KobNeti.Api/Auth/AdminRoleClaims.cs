@@ -12,6 +12,7 @@ public static class AdminRoles
 public static class AdminAuthorizationPolicies
 {
     public const string AdminSupport = "AdminSupport";
+    public const string PlatformAdmin = "PlatformAdmin";
 }
 
 public static class AdminRoleClaims

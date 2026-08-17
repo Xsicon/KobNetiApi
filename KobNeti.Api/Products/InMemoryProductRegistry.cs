@@ -9,6 +9,7 @@ namespace KobNeti.Api.Products;
 public class InMemoryProductRegistry : IProductRegistry
 {
     private readonly List<ProductRecord> _products;
+    private readonly object _gate = new();
 
     public InMemoryProductRegistry(IOptions<SupportOptions> options)
     {
@@ -34,17 +35,66 @@ public class InMemoryProductRegistry : IProductRegistry
             .ToList();
     }
 
-    public Task<IReadOnlyList<ProductRecord>> ListEnabledAsync(CancellationToken ct = default) =>
-        Task.FromResult<IReadOnlyList<ProductRecord>>(_products.Where(p => p.Enabled).ToList());
+    public Task<IReadOnlyList<ProductRecord>> ListEnabledAsync(CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlyList<ProductRecord>>(
+                _products.Where(p => p.Enabled).Select(p => Clone(p)!).ToList());
+        }
+    }
 
-    public Task<ProductRecord?> GetBySlugAsync(string slug, CancellationToken ct = default) =>
-        Task.FromResult(_products.FirstOrDefault(p =>
-            p.Enabled && string.Equals(p.Slug, slug, StringComparison.OrdinalIgnoreCase)));
+    public Task<ProductRecord?> GetBySlugAsync(string slug, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult(Clone(_products.FirstOrDefault(p =>
+                p.Enabled && string.Equals(p.Slug, slug, StringComparison.OrdinalIgnoreCase))));
+        }
+    }
 
     public Task<ProductRecord?> GetByPublicKeyAsync(string publicKey, CancellationToken ct = default)
     {
         var key = publicKey.Trim();
-        return Task.FromResult(_products.FirstOrDefault(p =>
-            p.Enabled && string.Equals(p.PublicKey, key, StringComparison.Ordinal)));
+        lock (_gate)
+        {
+            return Task.FromResult(Clone(_products.FirstOrDefault(p =>
+                p.Enabled && string.Equals(p.PublicKey, key, StringComparison.Ordinal))));
+        }
     }
+
+    public Task<ProductRecord?> RotatePublicKeyAsync(string slug, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            var hit = _products.FirstOrDefault(p =>
+                string.Equals(p.Slug, slug, StringComparison.OrdinalIgnoreCase));
+            if (hit is null)
+                return Task.FromResult<ProductRecord?>(null);
+
+            hit.PublicKey = EmbedKeyHelper.GeneratePublicKey(hit.Slug);
+            hit.UpdatedAt = DateTime.UtcNow;
+            return Task.FromResult(Clone(hit));
+        }
+    }
+
+    private static ProductRecord? Clone(ProductRecord? p) =>
+        p is null
+            ? null
+            : new ProductRecord
+            {
+                Id = p.Id,
+                Slug = p.Slug,
+                DisplayName = p.DisplayName,
+                ProductType = p.ProductType,
+                Status = p.Status,
+                SupportTier = p.SupportTier,
+                PublicKey = p.PublicKey,
+                JwtSecret = p.JwtSecret,
+                UpstreamApiBaseUrl = p.UpstreamApiBaseUrl,
+                PublicHelpCenterUrl = p.PublicHelpCenterUrl,
+                Enabled = p.Enabled,
+                CreatedAt = p.CreatedAt,
+                UpdatedAt = p.UpdatedAt
+            };
 }

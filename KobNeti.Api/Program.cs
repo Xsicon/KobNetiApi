@@ -5,6 +5,7 @@ using KobNeti.Api.Data;
 using KobNeti.Api.Products;
 using KobNeti.Api.Services;
 using KobNeti.Api.Staff;
+using KobNeti.Api.Teams;
 using KobNeti.Api.Tenancy;
 using Supabase;
 
@@ -14,6 +15,7 @@ builder.Services.Configure<SupportOptions>(builder.Configuration.GetSection(Supp
 builder.Services.AddSingleton<ITenantContextAccessor, TenantContextAccessor>();
 builder.Services.AddSingleton<InMemoryProductRegistry>();
 builder.Services.AddSingleton<InMemoryStaffDirectory>();
+builder.Services.AddSingleton<InMemoryTeamDirectory>();
 builder.Services.AddHttpClient();
 
 var supportOptions = builder.Configuration.GetSection(SupportOptions.SectionName).Get<SupportOptions>() ?? new SupportOptions();
@@ -25,6 +27,7 @@ if (useInMemory)
     builder.Services.AddSingleton<ISupportStore, InMemorySupportStore>();
     builder.Services.AddSingleton<IProductRegistry>(sp => sp.GetRequiredService<InMemoryProductRegistry>());
     builder.Services.AddSingleton<IStaffDirectory>(sp => sp.GetRequiredService<InMemoryStaffDirectory>());
+    builder.Services.AddSingleton<ITeamDirectory>(sp => sp.GetRequiredService<InMemoryTeamDirectory>());
 }
 else
 {
@@ -45,6 +48,7 @@ else
     builder.Services.AddSingleton<ISupportStore, SupabaseSupportStore>();
     builder.Services.AddSingleton<IProductRegistry, SupabaseProductRegistry>();
     builder.Services.AddSingleton<IStaffDirectory, SupabaseStaffDirectory>();
+    builder.Services.AddSingleton<ITeamDirectory, SupabaseTeamDirectory>();
 }
 
 builder.Services.AddSingleton<ITenantResolver, ProductTenantResolver>();
@@ -68,6 +72,8 @@ builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy(AdminAuthorizationPolicies.AdminSupport, policy =>
         policy.RequireAssertion(ctx => AdminRoleClaims.CanActAsChatAdmin(ctx.User)));
+    options.AddPolicy(AdminAuthorizationPolicies.PlatformAdmin, policy =>
+        policy.RequireAssertion(ctx => AdminRoleClaims.IsPlatformAdmin(ctx.User)));
 });
 
 builder.Services.AddCors(options =>

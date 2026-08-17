@@ -114,6 +114,33 @@ public class SupabaseProductRegistry : IProductRegistry
         }
     }
 
+    public async Task<ProductRecord?> RotatePublicKeyAsync(string slug, CancellationToken ct = default)
+    {
+        try
+        {
+            var response = await _client.From<SbProduct>()
+                .Filter("slug", Operator.Equals, slug)
+                .Get();
+
+            var row = (response.Models ?? []).FirstOrDefault();
+            if (row is null)
+                return await _configFallback.RotatePublicKeyAsync(slug, ct);
+
+            row.PublicKey = EmbedKeyHelper.GeneratePublicKey(row.Slug);
+            row.UpdatedAt = DateTime.UtcNow;
+            await _client.From<SbProduct>()
+                .Filter("id", Operator.Equals, row.Id.ToString())
+                .Update(row);
+
+            return OverlayConfigSecrets([ToRecord(row)]).First();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Product registry RotatePublicKey failed for {Slug}", slug);
+            return await _configFallback.RotatePublicKeyAsync(slug, ct);
+        }
+    }
+
     private IReadOnlyList<ProductRecord> OverlayConfigSecrets(List<ProductRecord> rows)
     {
         foreach (var row in rows)
