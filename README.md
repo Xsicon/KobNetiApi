@@ -1,30 +1,33 @@
-# Som Inner Core — Support API
+# KobNetiApi — Operations API
 
-Standalone multi-tenant Customer Support API for Murabac storefronts.
+Multi-tenant **ops** backend for KobNeti staff (support hub first; more modules later).
 
-**First tenant:** `muuqwear`  
-**Stubs:** `salguri`, `gaarx`  
-**Consumers:** MuuqWear.Web (Chat/Help cutover) and Som Inner Core Support Hub
+**Product APIs stay separate** (e.g. MuuqWearApi). This service is the control plane.
+
+**First product tenants:** `muuqwear`, `salguri`, `gaarx`  
+**Consumers:** storefront widgets + **KobNeti** ops UI (Support Hub)
+
+**Postgres schema:** `sominnercore` (unchanged name; do not rename).
 
 ## Projects
 
 | Path | Role |
 |------|------|
-| `Sominnercore.SupportApi/` | ASP.NET Core Web API (`net9.0`) |
-| `Sominnercore.SupportApi.Tests/` | Tenant isolation tests |
-| `supabase/support_schema.sql` | Postgres tables in schema `sominnercore` |
+| `KobNeti.Api/` | ASP.NET Core Web API (`net9.0`) |
+| `KobNeti.Api.Tests/` | Tenant isolation tests |
+| `supabase/support_schema.sql` | Tables in schema `sominnercore` |
 | `docs/support-muuqwear-cutover.md` | MuuqWear cutover + auth headers |
 
 ## Run locally
 
 ```bash
-dotnet run --project Sominnercore.SupportApi
+dotnet run --project KobNeti.Api
 ```
 
 Default URL: `http://localhost:5241/`  
 Default store: **in-memory** until `Supabase:ServiceRoleKey` is set and `Support:UseInMemoryStore` is `false`.
 
-Apply `supabase/support_schema.sql` in the Supabase SQL editor before using the real store.
+Apply `supabase/support_schema.sql` before using the real store. Keep schema name **`sominnercore`**.
 
 ## Auth quick reference
 
@@ -33,9 +36,9 @@ Apply `supabase/support_schema.sql` in the Supabase SQL editor before using the 
 | Public (guest chat, ticket submit, published KB) | `X-Tenant-Key` |
 | Agent (admin chat/tickets/KB) | `X-Tenant-Key` + `Authorization: Bearer <HS256 JWT>` |
 
-Agent JWT claims (MuuqWear-compatible): `sub`, `email`, `app_role` ∈ `admin` \| `support_team`.
+Agent JWT claims: `sub`, `email`, `app_role` ∈ `admin` \| `support_team`.
 
-Core Support Hub exchanges a Supabase access token via `POST /api/SupportAuth/exchange`.
+Ops UI exchanges a Supabase access token via `POST /api/SupportAuth/exchange`.
 
 Dev tenant key for muuqwear: `pk_muuqwear_dev_public` (see `appsettings.json`).
 
@@ -45,7 +48,7 @@ Dev tenant key for muuqwear: `pk_muuqwear_dev_public` (see `appsettings.json`).
 dotnet test
 ```
 
-## Related repos
+## Related
 
-- Som Inner Core (WASM admin / Support Hub client): sibling `Sominnercore`
-- MuuqWear API (legacy Chat/Help host until cutover): `MuuqWearApi`
+- KobNeti ops UI (WASM): sibling `KobNeti` (formerly Sominnercore)
+- MuuqWear API (product spoke): `MuuqWearApi`

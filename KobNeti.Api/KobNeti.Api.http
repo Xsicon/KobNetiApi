@@ -1,0 +1,4 @@
+﻿@KobNeti.Api_HostAddress = http://localhost:5241
+
+GET {{KobNeti.Api_HostAddress}}/health
+Accept: application/json

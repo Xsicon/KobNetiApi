@@ -5,7 +5,7 @@ The Som Inner Core WASM app only consumes this API over HTTP (`SupportApi:BaseUr
 
 ## What moved
 
-Som Inner Core Support is a multi-tenant Support API (`Sominnercore.SupportApi`) with MuuqWear Chat/Help route and DTO parity:
+Som Inner Core Support is a multi-tenant Support API (`KobNeti.Api`) with MuuqWear Chat/Help route and DTO parity:
 
 | Area | Routes |
 |------|--------|
@@ -71,7 +71,7 @@ Orders / customers / badges outside chat+tickets stay on MuuqWearApi (`api/Admin
 
 ```bash
 # Terminal 1 — Support API (in-memory store by default until ServiceRoleKey is set)
-dotnet run --project Sominnercore.SupportApi
+dotnet run --project KobNeti.Api
 
 # Terminal 2 — Blazor WASM admin
 dotnet run --project SominnercoreNew.csproj
@@ -122,4 +122,4 @@ from "MuuqWear".chat_sessions;
 
 ## Isolation
 
-Automated tests in `Sominnercore.SupportApi.Tests` assert tenant A cannot read tenant B’s chat sessions, tickets, or published KB articles.
+Automated tests in `KobNeti.Api.Tests` assert tenant A cannot read tenant B’s chat sessions, tickets, or published KB articles.

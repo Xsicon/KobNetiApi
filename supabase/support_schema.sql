@@ -1,9 +1,9 @@
--- Som Inner Core — multi-tenant Support module
+﻿-- Som Inner Core â€” multi-tenant Support module
 -- Schema: sominnercore
 -- Apply in the Supabase SQL editor AFTER rls_policies.sql (or ensure schema exists).
 --
 -- Access model:
---   Sominnercore.SupportApi uses the service_role key and enforces tenant_id in app code.
+--   KobNeti.Api uses the service_role key and enforces tenant_id in app code.
 --   Anon/authenticated must NOT have write access to these tables.
 --   Deny-by-default RLS is enabled for defense in depth (no permissive policies for anon).
 
@@ -11,7 +11,7 @@ create schema if not exists sominnercore;
 
 grant usage on schema sominnercore to anon, authenticated, service_role;
 
--- ─── Chat ────────────────────────────────────────────────────
+-- â”€â”€â”€ Chat â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 create table if not exists sominnercore.support_chat_sessions (
   id uuid primary key default gen_random_uuid(),
@@ -45,7 +45,7 @@ create table if not exists sominnercore.support_chat_messages (
 create index if not exists ix_support_chat_messages_tenant_session
   on sominnercore.support_chat_messages (tenant_id, session_id, created_at);
 
--- ─── Tickets ─────────────────────────────────────────────────
+-- â”€â”€â”€ Tickets â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 create table if not exists sominnercore.support_tickets (
   id uuid primary key default gen_random_uuid(),
@@ -86,7 +86,7 @@ create table if not exists sominnercore.support_ticket_replies (
 create index if not exists ix_support_ticket_replies_tenant_ticket
   on sominnercore.support_ticket_replies (tenant_id, ticket_id, created_at);
 
--- ─── Knowledge base ──────────────────────────────────────────
+-- â”€â”€â”€ Knowledge base â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 create table if not exists sominnercore.support_kb_articles (
   id uuid primary key default gen_random_uuid(),
@@ -145,7 +145,7 @@ create table if not exists sominnercore.support_kb_article_votes (
 create index if not exists ix_support_kb_votes_tenant_article
   on sominnercore.support_kb_article_votes (tenant_id, article_id);
 
--- ─── Macros + uploads ────────────────────────────────────────
+-- â”€â”€â”€ Macros + uploads â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 create table if not exists sominnercore.support_macros (
   id uuid primary key default gen_random_uuid(),
@@ -174,7 +174,7 @@ create table if not exists sominnercore.support_uploads (
 create index if not exists ix_support_uploads_tenant
   on sominnercore.support_uploads (tenant_id, created_at desc);
 
--- ─── Grants: service_role only for Support tables ────────────
+-- â”€â”€â”€ Grants: service_role only for Support tables â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 revoke all on table sominnercore.support_chat_sessions from anon, authenticated;
 revoke all on table sominnercore.support_chat_messages from anon, authenticated;
@@ -198,7 +198,7 @@ grant all on table sominnercore.support_kb_article_votes to service_role;
 grant all on table sominnercore.support_macros to service_role;
 grant all on table sominnercore.support_uploads to service_role;
 
--- Deny-by-default RLS (no policies for anon/authenticated → blocked even if grants change)
+-- Deny-by-default RLS (no policies for anon/authenticated â†’ blocked even if grants change)
 alter table sominnercore.support_chat_sessions enable row level security;
 alter table sominnercore.support_chat_messages enable row level security;
 alter table sominnercore.support_tickets enable row level security;
