@@ -55,18 +55,21 @@ public class SupportApiFactory : WebApplicationFactory<Program>
         return client;
     }
 
-    public static string CreateAgentToken(string secret, string role = AdminRoles.Admin)
+    public static string CreateAgentToken(string secret, string role = AdminRoles.Admin, params string[] productSlugs)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-        var claims = new[]
+        var claims = new List<Claim>
         {
-            new Claim(JwtRegisteredClaimNames.Sub, Guid.NewGuid().ToString()),
-            new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString()),
-            new Claim(JwtRegisteredClaimNames.Email, "agent@test.local"),
-            new Claim(AdminRoleClaims.RoleClaimType, role),
-            new Claim(ClaimTypes.Name, "Test Agent")
+            new(JwtRegisteredClaimNames.Sub, Guid.NewGuid().ToString()),
+            new(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString()),
+            new(JwtRegisteredClaimNames.Email, "agent@test.local"),
+            new(AdminRoleClaims.RoleClaimType, role),
+            new(ClaimTypes.Name, "Test Agent")
         };
+        var products = productSlugs.Length > 0 ? productSlugs : [AdminRoleClaims.AllProducts];
+        foreach (var p in products)
+            claims.Add(new Claim(AdminRoleClaims.ProductClaimType, p));
         var token = new JwtSecurityToken(claims: claims, expires: DateTime.UtcNow.AddHours(1), signingCredentials: creds);
         return new JwtSecurityTokenHandler().WriteToken(token);
     }

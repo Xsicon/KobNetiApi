@@ -37,6 +37,7 @@ public class SupportController : ApiControllerBase
     public ActionResult<Response<List<SupportTenantDTO>>> GetTenants()
     {
         var list = _resolver.ListEnabled()
+            .Where(t => AdminRoleClaims.CanAccessProduct(User, t.TenantId))
             .Select(t => new SupportTenantDTO
             {
                 TenantId = t.TenantId,

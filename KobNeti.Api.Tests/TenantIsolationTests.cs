@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using KobNeti.Api.Auth;
 using KobNeti.Api.DTOs;
 using KobNeti.Api.Shared;
 
@@ -116,5 +117,18 @@ public class TenantIsolationTests : IClassFixture<SupportApiFactory>
         using var client = _factory.CreateClient();
         var res = await client.GetAsync("api/Help/articles");
         Assert.Equal(HttpStatusCode.Unauthorized, res.StatusCode);
+    }
+
+    [Fact]
+    public async Task Agent_Scoped_To_Muuqwear_Cannot_Access_Salguri()
+    {
+        var scoped = SupportApiFactory.CreateAgentToken(
+            SupportApiFactory.CoreSecret,
+            AdminRoles.SupportTeam,
+            "muuqwear");
+
+        using var client = _factory.CreateTenantClient(SupportApiFactory.TenantBKey, scoped);
+        var res = await client.GetAsync("api/Support/counts");
+        Assert.Equal(HttpStatusCode.Forbidden, res.StatusCode);
     }
 }

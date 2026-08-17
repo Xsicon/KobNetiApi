@@ -4,6 +4,7 @@ using KobNeti.Api.Auth;
 using KobNeti.Api.Data;
 using KobNeti.Api.Products;
 using KobNeti.Api.Services;
+using KobNeti.Api.Staff;
 using KobNeti.Api.Tenancy;
 using Supabase;
 
@@ -12,6 +13,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<SupportOptions>(builder.Configuration.GetSection(SupportOptions.SectionName));
 builder.Services.AddSingleton<ITenantContextAccessor, TenantContextAccessor>();
 builder.Services.AddSingleton<InMemoryProductRegistry>();
+builder.Services.AddSingleton<InMemoryStaffDirectory>();
 builder.Services.AddHttpClient();
 
 var supportOptions = builder.Configuration.GetSection(SupportOptions.SectionName).Get<SupportOptions>() ?? new SupportOptions();
@@ -22,6 +24,7 @@ if (useInMemory)
 {
     builder.Services.AddSingleton<ISupportStore, InMemorySupportStore>();
     builder.Services.AddSingleton<IProductRegistry>(sp => sp.GetRequiredService<InMemoryProductRegistry>());
+    builder.Services.AddSingleton<IStaffDirectory>(sp => sp.GetRequiredService<InMemoryStaffDirectory>());
 }
 else
 {
@@ -41,6 +44,7 @@ else
     });
     builder.Services.AddSingleton<ISupportStore, SupabaseSupportStore>();
     builder.Services.AddSingleton<IProductRegistry, SupabaseProductRegistry>();
+    builder.Services.AddSingleton<IStaffDirectory, SupabaseStaffDirectory>();
 }
 
 builder.Services.AddSingleton<ITenantResolver, ProductTenantResolver>();
@@ -136,6 +140,7 @@ app.UseExceptionHandler(err =>
 });
 app.UseMiddleware<TenantMiddleware>();
 app.UseAuthentication();
+app.UseMiddleware<ProductAccessMiddleware>();
 app.UseAuthorization();
 app.MapControllers();
 app.MapHealthChecks("/health");

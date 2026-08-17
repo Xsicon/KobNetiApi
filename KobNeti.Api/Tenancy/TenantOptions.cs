@@ -1,3 +1,5 @@
+using KobNeti.Api.Staff;
+
 namespace KobNeti.Api.Tenancy;
 
 public class SupportOptions
@@ -8,6 +10,8 @@ public class SupportOptions
     public string CoreAgentJwtSecret { get; set; } = "dev-core-agent-secret-change-me-32chars!";
     public string[] CoreAdminEmails { get; set; } = [];
     public Dictionary<string, TenantConfig> Tenants { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Optional config-based staff assignments (dev/tests / overlay).</summary>
+    public List<StaffAssignmentConfig> Staff { get; set; } = [];
 }
 
 public class TenantConfig

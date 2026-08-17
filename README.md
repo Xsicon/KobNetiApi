@@ -44,9 +44,11 @@ Apply `supabase/support_schema.sql` before using the real store. Keep schema nam
 | Public (guest chat, ticket submit, published KB) | `X-Tenant-Key` |
 | Agent (admin chat/tickets/KB) | `X-Tenant-Key` + `Authorization: Bearer <HS256 JWT>` |
 
-Agent JWT claims: `sub`, `email`, `app_role` ∈ `admin` \| `support_team`.
+Agent JWT claims: `sub`, `email`, `app_role` ∈ `admin` \| `manager` \| `support` (legacy `support_team`), and one or more `product` claims (`*` = all products).
 
 Ops UI exchanges a Supabase access token via `POST /api/SupportAuth/exchange`.
+
+Staff source of truth: `sominnercore.staff_profiles` + `staff_product_access` (SQL: `supabase/staff_access.sql`), with optional `Support:Staff` config fallback. Platform admins: `app_metadata.role=admin` or `Support:CoreAdminEmails`.
 
 Dev tenant key for muuqwear: `pk_muuqwear_dev_public` (see `appsettings.json`).
 
