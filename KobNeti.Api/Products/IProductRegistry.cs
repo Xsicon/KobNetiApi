@@ -12,6 +12,7 @@ public class ProductRecord
     public string? JwtSecret { get; set; }
     public string? UpstreamApiBaseUrl { get; set; }
     public string? PublicHelpCenterUrl { get; set; }
+    public string? GithubRepoUrl { get; set; }
     public bool Enabled { get; set; } = true;
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
@@ -23,6 +24,7 @@ public interface IProductRegistry
     Task<ProductRecord?> GetBySlugAsync(string slug, CancellationToken ct = default);
     Task<ProductRecord?> GetByPublicKeyAsync(string publicKey, CancellationToken ct = default);
     Task<ProductRecord?> RotatePublicKeyAsync(string slug, CancellationToken ct = default);
+    Task<ProductRecord?> UpdateGithubRepoUrlAsync(string slug, string? githubRepoUrl, CancellationToken ct = default);
 }
 
 public static class EmbedKeyHelper

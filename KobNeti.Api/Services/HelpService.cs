@@ -1,5 +1,6 @@
 using KobNeti.Api.Data;
 using KobNeti.Api.DTOs;
+using KobNeti.Api.Products;
 using KobNeti.Api.Shared;
 
 namespace KobNeti.Api.Services;
@@ -13,7 +14,9 @@ public interface IHelpService
     Task<Response<SupportTicketDTO>> UpdateTicketAsync(string tenantId, Guid ticketId, UpdateTicketDTO request);
     Task<Response<SupportTicketReplyDTO>> AddTicketReplyAsync(string tenantId, Guid ticketId, Guid? senderId, string senderName, string message);
     Task<Response<SupportTicketDTO>> AssignTicketToMeAsync(string tenantId, Guid ticketId, Guid userId, string userName);
+    Task<Response<SupportTicketDTO>> CreateTicketFromChatAsync(string tenantId, Guid sessionId, string? category, string? subject);
     Task<Response<TicketStatsDTO>> GetTicketStatsAsync(string tenantId);
+    Task<Response<List<HelpArticleDTO>>> SuggestArticlesForTicketAsync(string tenantId, Guid ticketId, int limit = 5);
 
     Task<Response<PaginatedResponse<HelpArticleDTO>>> GetPublishedArticlesAsync(string tenantId, string? category, string? search, int page, int pageSize);
     Task<Response<HelpArticleDTO>> GetPublishedArticleAsync(string tenantId, Guid articleId);
@@ -32,14 +35,26 @@ public interface IHelpService
 public class HelpService : IHelpService
 {
     private readonly ISupportStore _store;
+    private readonly IProductRegistry _products;
     private readonly IConfiguration _configuration;
     private readonly ILogger<HelpService> _logger;
+    private readonly IAuditService _audit;
+    private readonly IAppNotificationService _notify;
 
-    public HelpService(ISupportStore store, IConfiguration configuration, ILogger<HelpService> logger)
+    public HelpService(
+        ISupportStore store,
+        IProductRegistry products,
+        IConfiguration configuration,
+        ILogger<HelpService> logger,
+        IAuditService audit,
+        IAppNotificationService notify)
     {
         _store = store;
+        _products = products;
         _configuration = configuration;
         _logger = logger;
+        _audit = audit;
+        _notify = notify;
     }
 
     public async Task<Response<SupportTicketDTO>> SubmitTicketAsync(string tenantId, SubmitTicketDTO request)
@@ -48,6 +63,11 @@ public class HelpService : IHelpService
         {
             var seq = await _store.NextTicketSequenceAsync(tenantId);
             var now = DateTime.UtcNow;
+            var product = await _products.GetBySlugAsync(tenantId);
+            var tier = product?.SupportTier ?? "standard";
+            var frMinutes = TicketSla.FirstResponseMinutes(tier);
+            var resolveMinutes = TicketSla.ResolveMinutes(tier);
+
             var ticket = new TicketEntity
             {
                 Id = Guid.NewGuid(),
@@ -55,15 +75,21 @@ public class HelpService : IHelpService
                 TicketNumber = $"T-{now:yyyyMMdd}-{seq:D4}",
                 Name = request.Name.Trim(),
                 Email = request.Email.Trim(),
-                Category = request.Category.Trim(),
+                Category = string.IsNullOrWhiteSpace(request.Category) ? "general" : request.Category.Trim(),
                 Subject = request.Subject.Trim(),
                 Message = request.Message.Trim(),
                 Priority = TicketPriority.FromCategory(request.Category),
-                Status = TicketStatus.Open,
+                Status = TicketStatus.New,
+                PageUrl = string.IsNullOrWhiteSpace(request.PageUrl) ? null : request.PageUrl.Trim(),
+                AccountId = string.IsNullOrWhiteSpace(request.AccountId) ? null : request.AccountId.Trim(),
+                SlaFirstResponseMinutes = frMinutes,
+                FirstResponseDueAt = now.AddMinutes(frMinutes),
+                ResolveDueAt = now.AddMinutes(resolveMinutes),
                 CreatedAt = now,
                 UpdatedAt = now
             };
             await _store.InsertTicketAsync(ticket);
+            await AddEventAsync(tenantId, ticket.Id, "created", "Customer", $"Ticket opened ({tier} SLA)");
             return Response<SupportTicketDTO>.SuccessResponse(await MapTicketAsync(tenantId, ticket, false), "Ticket submitted");
         }
         catch (Exception ex)
@@ -101,15 +127,19 @@ public class HelpService : IHelpService
 
     public async Task<Response<SupportTicketDTO>> UpdateTicketStatusAsync(string tenantId, Guid ticketId, string status)
     {
-        var normalized = status.Trim().ToLowerInvariant();
+        var normalized = TicketStatus.Normalize(status);
         if (!TicketStatus.All.Contains(normalized))
             return Response<SupportTicketDTO>.Fail("Invalid status");
 
         var ticket = await _store.GetTicketAsync(tenantId, ticketId);
         if (ticket is null) return Response<SupportTicketDTO>.Fail("Ticket not found");
+        var before = ticket.Status;
         ticket.Status = normalized;
         ticket.UpdatedAt = DateTime.UtcNow;
         await _store.UpdateTicketAsync(ticket);
+        await AddEventAsync(tenantId, ticket.Id, "status_changed", "Agent", $"Status → {normalized}");
+        await _audit.WriteAsync(tenantId, AuditActions.TicketStatus, "ticket", ticket.Id.ToString(),
+            null, "Agent", new { status = before }, new { status = normalized });
         return Response<SupportTicketDTO>.SuccessResponse(await MapTicketAsync(tenantId, ticket, true), "Status updated");
     }
 
@@ -120,9 +150,12 @@ public class HelpService : IHelpService
 
         if (!string.IsNullOrWhiteSpace(request.Status))
         {
-            var s = request.Status.Trim().ToLowerInvariant();
+            var s = TicketStatus.Normalize(request.Status);
             if (!TicketStatus.All.Contains(s)) return Response<SupportTicketDTO>.Fail("Invalid status");
+            var before = ticket.Status;
             ticket.Status = s;
+            await _audit.WriteAsync(tenantId, AuditActions.TicketStatus, "ticket", ticket.Id.ToString(),
+                null, "Agent", new { status = before }, new { status = s });
         }
         if (!string.IsNullOrWhiteSpace(request.Priority))
         {
@@ -143,9 +176,14 @@ public class HelpService : IHelpService
             if (ticket.AssignedTo is null && request.AssignedToName is null)
                 ticket.AssignedToName = null;
         }
+        if (request.Tags is not null)
+            ticket.Tags = TicketTags.Serialize(request.Tags);
+        if (request.EngTaskId.HasValue)
+            ticket.EngTaskId = request.EngTaskId.Value == Guid.Empty ? null : request.EngTaskId;
 
         ticket.UpdatedAt = DateTime.UtcNow;
         await _store.UpdateTicketAsync(ticket);
+        await AddEventAsync(tenantId, ticket.Id, "updated", "Agent", "Ticket fields updated");
         return Response<SupportTicketDTO>.SuccessResponse(await MapTicketAsync(tenantId, ticket, true), "Ticket updated");
     }
 
@@ -168,12 +206,13 @@ public class HelpService : IHelpService
         };
         await _store.InsertReplyAsync(reply);
 
-        if (ticket.Status == TicketStatus.Open)
+        if (TicketStatus.IsNewOrOpen(ticket.Status))
             ticket.Status = TicketStatus.InProgress;
         if (ticket.FirstResponseAt is null)
             ticket.FirstResponseAt = now;
         ticket.UpdatedAt = now;
         await _store.UpdateTicketAsync(ticket);
+        await AddEventAsync(tenantId, ticket.Id, "reply", senderName, "Agent reply added");
 
         return Response<SupportTicketReplyDTO>.SuccessResponse(new SupportTicketReplyDTO
         {
@@ -192,11 +231,94 @@ public class HelpService : IHelpService
         if (ticket is null) return Response<SupportTicketDTO>.Fail("Ticket not found");
         ticket.AssignedTo = userId;
         ticket.AssignedToName = userName;
-        if (ticket.Status == TicketStatus.Open)
+        if (TicketStatus.IsNewOrOpen(ticket.Status))
             ticket.Status = TicketStatus.InProgress;
         ticket.UpdatedAt = DateTime.UtcNow;
         await _store.UpdateTicketAsync(ticket);
+        await AddEventAsync(tenantId, ticket.Id, "assigned", userName, $"Assigned to {userName}");
+        await _audit.WriteAsync(tenantId, AuditActions.TicketAssign, "ticket", ticket.Id.ToString(),
+            userId, userName, null, new { assignedTo = userId, assignedToName = userName });
+        await _notify.NotifyAsync(tenantId, "assign", $"Ticket assigned: {ticket.TicketNumber}",
+            ticket.Subject, userId, userName, "ticket", ticket.Id.ToString());
         return Response<SupportTicketDTO>.SuccessResponse(await MapTicketAsync(tenantId, ticket, true), "Assigned");
+    }
+
+    public async Task<Response<SupportTicketDTO>> CreateTicketFromChatAsync(
+        string tenantId,
+        Guid sessionId,
+        string? category,
+        string? subject)
+    {
+        var session = await _store.GetSessionAsync(tenantId, sessionId);
+        if (session is null)
+            return Response<SupportTicketDTO>.Fail("Chat session not found");
+
+        var messages = await _store.ListMessagesAsync(tenantId, sessionId);
+        var transcript = string.Join("\n", messages.Select(m =>
+            $"[{m.SenderType}] {m.SenderName ?? "Unknown"}: {m.Message}"));
+
+        var name = string.IsNullOrWhiteSpace(session.GuestName) ? "Chat visitor" : session.GuestName.Trim();
+        var email = string.IsNullOrWhiteSpace(session.GuestEmail) ? "unknown@chat.local" : session.GuestEmail.Trim();
+        var cat = string.IsNullOrWhiteSpace(category) ? "chat" : category.Trim();
+        var subj = string.IsNullOrWhiteSpace(subject)
+            ? $"Chat conversation {sessionId.ToString()[..8]}"
+            : subject.Trim();
+
+        var seq = await _store.NextTicketSequenceAsync(tenantId);
+        var now = DateTime.UtcNow;
+        var product = await _products.GetBySlugAsync(tenantId);
+        var tier = product?.SupportTier ?? "standard";
+        var frMinutes = TicketSla.FirstResponseMinutes(tier);
+        var resolveMinutes = TicketSla.ResolveMinutes(tier);
+        var ticket = new TicketEntity
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            TicketNumber = $"T-{now:yyyyMMdd}-{seq:D4}",
+            Name = name,
+            Email = email,
+            Category = cat,
+            Subject = subj,
+            Message = string.IsNullOrWhiteSpace(transcript)
+                ? "Converted from live chat (no messages)."
+                : transcript,
+            Priority = TicketPriority.FromCategory(cat),
+            Status = TicketStatus.New,
+            ExternalCustomerId = session.ExternalCustomerId,
+            ChatSessionId = sessionId,
+            SlaFirstResponseMinutes = frMinutes,
+            FirstResponseDueAt = now.AddMinutes(frMinutes),
+            ResolveDueAt = now.AddMinutes(resolveMinutes),
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        await _store.InsertTicketAsync(ticket);
+        await AddEventAsync(tenantId, ticket.Id, "created_from_chat", "Agent", $"Converted from chat {sessionId}");
+        return Response<SupportTicketDTO>.SuccessResponse(await MapTicketAsync(tenantId, ticket, false), "Ticket created from chat");
+    }
+
+    public async Task<Response<List<HelpArticleDTO>>> SuggestArticlesForTicketAsync(
+        string tenantId, Guid ticketId, int limit = 5)
+    {
+        var ticket = await _store.GetTicketAsync(tenantId, ticketId);
+        if (ticket is null)
+            return Response<List<HelpArticleDTO>>.Fail("Ticket not found");
+
+        var category = ticket.Category;
+        var (items, _) = await _store.ListArticlesAsync(
+            tenantId, category, "published", null, 1, Math.Clamp(limit, 1, 20), true);
+
+        if (items.Count == 0 && !string.IsNullOrWhiteSpace(ticket.Subject))
+        {
+            (items, _) = await _store.ListArticlesAsync(
+                tenantId, null, "published", ticket.Subject, 1, Math.Clamp(limit, 1, 20), true);
+        }
+
+        var dtos = new List<HelpArticleDTO>();
+        foreach (var a in items)
+            dtos.Add(await MapArticleAsync(tenantId, a, false, null));
+
+        return Response<List<HelpArticleDTO>>.SuccessResponse(dtos, "Suggestions loaded");
     }
 
     public async Task<Response<TicketStatsDTO>> GetTicketStatsAsync(string tenantId)
@@ -208,6 +330,7 @@ public class HelpService : IHelpService
             {
                 OpenCount = stats.OpenCount,
                 InProgressCount = stats.InProgressCount,
+                WaitingCount = stats.WaitingCount,
                 TotalCount = stats.TotalCount
             }, "Stats loaded");
         }
@@ -430,11 +553,23 @@ public class HelpService : IHelpService
         await _store.ReplaceStepsAsync(tenantId, articleId, entities);
     }
 
+    private async Task AddEventAsync(string tenantId, Guid ticketId, string eventType, string? actor, string? detail)
+    {
+        await _store.InsertTicketEventAsync(new TicketEventEntity
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            TicketId = ticketId,
+            EventType = eventType,
+            ActorName = actor,
+            Detail = detail,
+            CreatedAt = DateTime.UtcNow
+        });
+    }
+
     private async Task<SupportTicketDTO> MapTicketAsync(string tenantId, TicketEntity t, bool includeReplies)
     {
-        var replies = includeReplies
-            ? await _store.ListRepliesAsync(tenantId, t.Id)
-            : await _store.ListRepliesAsync(tenantId, t.Id);
+        var replies = await _store.ListRepliesAsync(tenantId, t.Id);
 
         return new SupportTicketDTO
         {
@@ -454,6 +589,24 @@ public class HelpService : IHelpService
             CreatedAt = t.CreatedAt,
             UpdatedAt = t.UpdatedAt,
             ReplyCount = replies.Count,
+            PageUrl = t.PageUrl,
+            AccountId = t.AccountId,
+            ChatSessionId = t.ChatSessionId,
+            Tags = TicketTags.Parse(t.Tags),
+            SlaFirstResponseMinutes = t.SlaFirstResponseMinutes,
+            FirstResponseDueAt = t.FirstResponseDueAt,
+            ResolveDueAt = t.ResolveDueAt,
+            EngTaskId = t.EngTaskId,
+            Timeline = includeReplies
+                ? (await _store.ListTicketEventsAsync(tenantId, t.Id)).Select(e => new TicketEventDTO
+                {
+                    Id = e.Id,
+                    EventType = e.EventType,
+                    ActorName = e.ActorName,
+                    Detail = e.Detail,
+                    CreatedAt = e.CreatedAt
+                }).ToList()
+                : [],
             Replies = includeReplies
                 ? replies.Select(r => new SupportTicketReplyDTO
                 {

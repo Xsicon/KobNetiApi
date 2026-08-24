@@ -28,6 +28,7 @@ public class InMemoryProductRegistry : IProductRegistry
                 JwtSecret = kv.Value.JwtSecret,
                 UpstreamApiBaseUrl = kv.Value.UpstreamApiBaseUrl,
                 PublicHelpCenterUrl = kv.Value.PublicHelpCenterUrl,
+                GithubRepoUrl = null,
                 Enabled = kv.Value.Enabled,
                 CreatedAt = now,
                 UpdatedAt = now
@@ -78,6 +79,21 @@ public class InMemoryProductRegistry : IProductRegistry
         }
     }
 
+    public Task<ProductRecord?> UpdateGithubRepoUrlAsync(string slug, string? githubRepoUrl, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            var hit = _products.FirstOrDefault(p =>
+                string.Equals(p.Slug, slug, StringComparison.OrdinalIgnoreCase));
+            if (hit is null)
+                return Task.FromResult<ProductRecord?>(null);
+
+            hit.GithubRepoUrl = string.IsNullOrWhiteSpace(githubRepoUrl) ? null : githubRepoUrl.Trim();
+            hit.UpdatedAt = DateTime.UtcNow;
+            return Task.FromResult(Clone(hit));
+        }
+    }
+
     private static ProductRecord? Clone(ProductRecord? p) =>
         p is null
             ? null
@@ -93,6 +109,7 @@ public class InMemoryProductRegistry : IProductRegistry
                 JwtSecret = p.JwtSecret,
                 UpstreamApiBaseUrl = p.UpstreamApiBaseUrl,
                 PublicHelpCenterUrl = p.PublicHelpCenterUrl,
+                GithubRepoUrl = p.GithubRepoUrl,
                 Enabled = p.Enabled,
                 CreatedAt = p.CreatedAt,
                 UpdatedAt = p.UpdatedAt

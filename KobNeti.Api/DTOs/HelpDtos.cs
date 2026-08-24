@@ -18,6 +18,15 @@ public class SupportTicketDTO
     public DateTime? CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
     public int ReplyCount { get; set; }
+    public string? PageUrl { get; set; }
+    public string? AccountId { get; set; }
+    public Guid? ChatSessionId { get; set; }
+    public List<string> Tags { get; set; } = [];
+    public int? SlaFirstResponseMinutes { get; set; }
+    public DateTime? FirstResponseDueAt { get; set; }
+    public DateTime? ResolveDueAt { get; set; }
+    public Guid? EngTaskId { get; set; }
+    public List<TicketEventDTO> Timeline { get; set; } = [];
     public List<SupportTicketReplyDTO> Replies { get; set; } = [];
 }
 
@@ -37,6 +46,17 @@ public class UpdateTicketDTO
     public string? Team { get; set; }
     public Guid? AssignedTo { get; set; }
     public string? AssignedToName { get; set; }
+    public List<string>? Tags { get; set; }
+    public Guid? EngTaskId { get; set; }
+}
+
+public class TicketEventDTO
+{
+    public Guid Id { get; set; }
+    public string EventType { get; set; } = string.Empty;
+    public string? ActorName { get; set; }
+    public string? Detail { get; set; }
+    public DateTime? CreatedAt { get; set; }
 }
 
 public class AddTicketReplyDTO
@@ -51,6 +71,16 @@ public class SubmitTicketDTO
     public string Category { get; set; } = string.Empty;
     public string Subject { get; set; } = string.Empty;
     public string Message { get; set; } = string.Empty;
+    /// <summary>Page where the form was submitted (W2.3).</summary>
+    public string? PageUrl { get; set; }
+    /// <summary>Storefront account id if the visitor is signed in (W2.3).</summary>
+    public string? AccountId { get; set; }
+}
+
+public class ConvertChatToTicketDTO
+{
+    public string? Category { get; set; }
+    public string? Subject { get; set; }
 }
 
 public class UpdateTicketStatusDTO
@@ -62,15 +92,44 @@ public class TicketStatsDTO
 {
     public int OpenCount { get; set; }
     public int InProgressCount { get; set; }
+    public int WaitingCount { get; set; }
     public int TotalCount { get; set; }
 }
 
 public static class TicketStatus
 {
+    public const string New = "new";
+    /// <summary>Legacy synonym of <see cref="New"/>.</summary>
     public const string Open = "open";
     public const string InProgress = "in_progress";
+    public const string Waiting = "waiting";
     public const string Resolved = "resolved";
-    public static readonly string[] All = [Open, InProgress, Resolved];
+    public const string Closed = "closed";
+
+    public static readonly string[] All =
+    [
+        New, Open, InProgress, Waiting, Resolved, Closed
+    ];
+
+    public static string Normalize(string? status)
+    {
+        var s = (status ?? "").Trim().ToLowerInvariant();
+        if (string.Equals(s, Open, StringComparison.Ordinal))
+            return New;
+        return s;
+    }
+
+    public static bool IsInbox(string? status)
+    {
+        var s = Normalize(status);
+        return s is New or InProgress or Waiting;
+    }
+
+    public static bool IsNewOrOpen(string? status)
+    {
+        var s = (status ?? "").Trim().ToLowerInvariant();
+        return s is New or Open;
+    }
 }
 
 public static class TicketPriority
@@ -213,6 +272,7 @@ public class ProductDTO
     public string SupportTier { get; set; } = string.Empty;
     public string PublicKey { get; set; } = string.Empty;
     public string PublicHelpCenterUrl { get; set; } = string.Empty;
+    public string? GithubRepoUrl { get; set; }
     public bool Enabled { get; set; }
 }
 

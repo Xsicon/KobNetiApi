@@ -89,6 +89,31 @@ WASM `wwwroot/appsettings.json`:
 
 Production: set `Supabase:ServiceRoleKey`, set `Support:UseInMemoryStore` to `false`, apply `supabase/support_schema.sql`, expose schema `sominnercore` for PostgREST.
 
+## W2.10 Decision — ops-owned (default)
+
+**Chosen path:** MuuqWear support data is **ops-owned in KobNetiApi**.  
+Leave `Support:Tenants:muuqwear:UpstreamApiBaseUrl` **empty** in all environments unless you temporarily need a live bridge.
+
+- Dev `appsettings.Development.json` no longer points at localhost:5243 by default.
+- To bridge temporarily: set env `Support__Tenants__muuqwear__UpstreamApiBaseUrl` + matching `JwtSecret`.
+- To finish cutover: migrate chat/tickets/KB into `sominnercore` (SQL sketch below), then keep upstream empty forever.
+
+## W3.5 — Bridge DI removed
+
+`Program.cs` registers **local** `ChatService` / `HelpService` / `SupportCountsService` directly.  
+`Bridging*` classes remain in the repo for emergency re-wire only; they are **not** registered.  
+Ops store is the source of truth when `UpstreamApiBaseUrl` is empty.
+
+## Tenant stubs / W3.7 widgets
+
+| Tenant | Enabled | Dev public key |
+|--------|---------|----------------|
+| `muuqwear` | yes | `pk_muuqwear_dev_public` |
+| `salguri` | yes | `pk_salguri_dev_public` |
+| `gaarx` | yes | `pk_gaarx_dev_public` |
+
+Embed via Staff → Embed key / `GET api/products/{slug}/widget-snippet`. Apply SQL including `support_w3_incidents.sql` before production incidents.
+
 ## Data migration notes (MuuqWear → Core)
 
 Source schema: `MuuqWear`. Target: `sominnercore`. Set `tenant_id = 'muuqwear'` on every row.
@@ -117,9 +142,8 @@ from "MuuqWear".chat_sessions;
 
 ## Tenant stubs
 
-- `muuqwear` — enabled  
-- `salguri` / `gaarx` — config stubs (`Enabled: false`) until cutover  
+See W3.7 table above — Salguri/GaarX are enabled with widget public keys in `appsettings.json`.
 
 ## Isolation
 
-Automated tests in `KobNeti.Api.Tests` assert tenant A cannot read tenant B’s chat sessions, tickets, or published KB articles.
+Automated tests in `KobNeti.Api.Tests` assert tenant A cannot read tenant B’s chat sessions, tickets, published KB articles, or incidents.

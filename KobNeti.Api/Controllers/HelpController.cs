@@ -32,6 +32,13 @@ public class HelpController : ApiControllerBase
         return HandleResponse(await _help.SubmitTicketAsync(RequireTenantId(_tenant), request));
     }
 
+    /// <summary>W2.4 — Email-to-ticket stub (not implemented).</summary>
+    [HttpPost("email-to-ticket")]
+    [AllowAnonymous]
+    public ActionResult<Response<object>> EmailToTicketStub() =>
+        StatusCode(StatusCodes.Status501NotImplemented,
+            Response<object>.Fail("Email-to-ticket is not implemented yet (W2.4 stub)."));
+
     [HttpGet("admin/tickets")]
     [Authorize(Policy = AdminAuthorizationPolicies.AdminSupport)]
     public async Task<ActionResult<Response<PaginatedResponse<SupportTicketDTO>>>> GetAllTickets(
@@ -83,6 +90,12 @@ public class HelpController : ApiControllerBase
         return HandleResponse(await _help.AssignTicketToMeAsync(
             RequireTenantId(_tenant), ticketId, userId, AdminRoleClaims.GetDisplayName(User)));
     }
+
+    [HttpGet("admin/tickets/{ticketId:guid}/suggestions")]
+    [Authorize(Policy = AdminAuthorizationPolicies.AdminSupport)]
+    public async Task<ActionResult<Response<List<HelpArticleDTO>>>> SuggestArticles(
+        Guid ticketId, [FromQuery] int limit = 5) =>
+        HandleResponse(await _help.SuggestArticlesForTicketAsync(RequireTenantId(_tenant), ticketId, limit));
 
     [HttpGet("admin/stats")]
     [Authorize(Policy = AdminAuthorizationPolicies.AdminSupport)]

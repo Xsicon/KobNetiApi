@@ -4,7 +4,9 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using KobNeti.Api.DTOs;
 using KobNeti.Api.Products;
+using KobNeti.Api.Services;
 using KobNeti.Api.Staff;
 using KobNeti.Api.Tenancy;
 
@@ -28,19 +30,22 @@ public class AgentTokenService : IAgentTokenService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IStaffDirectory _staff;
     private readonly IProductRegistry _products;
+    private readonly IAuditService _audit;
 
     public AgentTokenService(
         IOptions<SupportOptions> options,
         IConfiguration configuration,
         IHttpClientFactory httpClientFactory,
         IStaffDirectory staff,
-        IProductRegistry products)
+        IProductRegistry products,
+        IAuditService audit)
     {
         _options = options.Value;
         _configuration = configuration;
         _httpClientFactory = httpClientFactory;
         _staff = staff;
         _products = products;
+        _audit = audit;
     }
 
     public async Task<(bool Ok, string? Token, string? Error)> ExchangeSupabaseTokenAsync(string supabaseAccessToken)
@@ -150,6 +155,15 @@ public class AgentTokenService : IAgentTokenService
             return (false, null, $"Role '{role}' cannot access Support APIs.");
 
         var token = CreateAgentToken(userId, email, role, userName, products);
+        try
+        {
+            await _audit.WriteAsync("ops", AuditActions.AuthExchange, "auth", userId.ToString(),
+                userId, userName ?? email, null, new { email, role });
+        }
+        catch
+        {
+            // never block login on audit failure
+        }
         return (true, token, null);
     }
 

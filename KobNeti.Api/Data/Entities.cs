@@ -43,8 +43,28 @@ public class TicketEntity
     public string? AssignedToName { get; set; }
     public DateTime? FirstResponseAt { get; set; }
     public Guid? ExternalCustomerId { get; set; }
+    public string? PageUrl { get; set; }
+    public string? AccountId { get; set; }
+    public Guid? ChatSessionId { get; set; }
+    /// <summary>Comma-separated or JSON list of tags (W2.6).</summary>
+    public string? Tags { get; set; }
+    public int? SlaFirstResponseMinutes { get; set; }
+    public DateTime? FirstResponseDueAt { get; set; }
+    public DateTime? ResolveDueAt { get; set; }
+    public Guid? EngTaskId { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+}
+
+public class TicketEventEntity
+{
+    public Guid Id { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public Guid TicketId { get; set; }
+    public string EventType { get; set; } = string.Empty;
+    public string? ActorName { get; set; }
+    public string? Detail { get; set; }
+    public DateTime CreatedAt { get; set; }
 }
 
 public class TicketReplyEntity
@@ -125,4 +145,301 @@ public class UploadEntity
     public long? SizeBytes { get; set; }
     public Guid? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; }
+}
+
+public class IncidentEntity
+{
+    public Guid Id { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public string IncidentNumber { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string Severity { get; set; } = "sev3";
+    public string Status { get; set; } = "open";
+    public string? CommanderName { get; set; }
+    public Guid? CommanderUserId { get; set; }
+    public Guid? SourceTicketId { get; set; }
+    public string? PostmortemNotes { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    public DateTime? ResolvedAt { get; set; }
+}
+
+public class IncidentEventEntity
+{
+    public Guid Id { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public Guid IncidentId { get; set; }
+    public string EventType { get; set; } = string.Empty;
+    public string? ActorName { get; set; }
+    public string? Detail { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+public class EngTaskEntity
+{
+    public Guid Id { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public string TaskNumber { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string TaskType { get; set; } = "feature";
+    public string Status { get; set; } = "backlog";
+    public string Priority { get; set; } = "medium";
+    public decimal? EstimatePoints { get; set; }
+    public string? AssigneeName { get; set; }
+    public Guid? AssigneeUserId { get; set; }
+    public Guid? TicketId { get; set; }
+    public Guid? MilestoneId { get; set; }
+    public string? GithubPrUrl { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+public class EngMilestoneEntity
+{
+    public Guid Id { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string Status { get; set; } = "planned";
+    public DateOnly? TargetDate { get; set; }
+    public DateOnly? StartDate { get; set; }
+    public int SortOrder { get; set; }
+    public Guid? CalendarEventId { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+public class CalendarEventEntity
+{
+    public Guid Id { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string EventType { get; set; } = "milestone";
+    public DateTime StartsAt { get; set; }
+    public DateTime? EndsAt { get; set; }
+    public string? SourceEntityType { get; set; }
+    public Guid? SourceEntityId { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+public class GithubCacheEntity
+{
+    public Guid Id { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public string RepoUrl { get; set; } = string.Empty;
+    public string CacheKind { get; set; } = string.Empty;
+    public string PayloadJson { get; set; } = "[]";
+    public DateTime FetchedAt { get; set; }
+}
+
+public class TimeEntryEntity
+{
+    public Guid Id { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public Guid? UserId { get; set; }
+    public string UserName { get; set; } = string.Empty;
+    public string EntryType { get; set; } = "manual";
+    public DateTime? ClockIn { get; set; }
+    public DateTime? ClockOut { get; set; }
+    public int? Minutes { get; set; }
+    public Guid? TicketId { get; set; }
+    public Guid? EngTaskId { get; set; }
+    public string? Notes { get; set; }
+    public string Status { get; set; } = "approved";
+    public Guid? SupersedesId { get; set; }
+    public Guid? ApprovalId { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+public class ApprovalRequestEntity
+{
+    public Guid Id { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public string RequestType { get; set; } = string.Empty;
+    public string Status { get; set; } = "pending";
+    public string PayloadJson { get; set; } = "{}";
+    public Guid? RequesterUserId { get; set; }
+    public string? RequesterName { get; set; }
+    public Guid? ApproverUserId { get; set; }
+    public string? ApproverName { get; set; }
+    public DateTime? DecidedAt { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+public class PayRateEntity
+{
+    public Guid Id { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public Guid? StaffId { get; set; }
+    public Guid? UserId { get; set; }
+    public string? Role { get; set; }
+    public decimal HourlyRate { get; set; }
+    public string Currency { get; set; } = "USD";
+    public DateOnly EffectiveFrom { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+public class PayPeriodEntity
+{
+    public Guid Id { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public DateOnly StartsOn { get; set; }
+    public DateOnly EndsOn { get; set; }
+    public string Status { get; set; } = "open";
+    public int TotalMinutes { get; set; }
+    public decimal TotalAmount { get; set; }
+    public string Currency { get; set; } = "USD";
+    public string LinesJson { get; set; } = "[]";
+    public Guid? ApprovalId { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+public class AuditEventEntity
+{
+    public Guid Id { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public Guid? ActorUserId { get; set; }
+    public string? ActorName { get; set; }
+    public string Action { get; set; } = string.Empty;
+    public string EntityType { get; set; } = string.Empty;
+    public string? EntityId { get; set; }
+    public string? BeforeJson { get; set; }
+    public string? AfterJson { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+public class NotificationEntity
+{
+    public Guid Id { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public Guid? UserId { get; set; }
+    public string? UserName { get; set; }
+    public string Channel { get; set; } = "in_app";
+    public string Title { get; set; } = string.Empty;
+    public string? Body { get; set; }
+    public string? LinkUrl { get; set; }
+    public string? SourceType { get; set; }
+    public string? SourceId { get; set; }
+    public DateTime? ReadAt { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+public class NotificationPrefsEntity
+{
+    public Guid Id { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public Guid UserId { get; set; }
+    public bool AssignEnabled { get; set; } = true;
+    public bool ApprovalEnabled { get; set; } = true;
+    public bool EscalationEnabled { get; set; } = true;
+    public bool ReminderEnabled { get; set; } = true;
+    public DateTime UpdatedAt { get; set; }
+}
+
+public class OpsFileEntity
+{
+    public Guid Id { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public string FolderPath { get; set; } = "/";
+    public string FileName { get; set; } = string.Empty;
+    public string? ContentType { get; set; }
+    public long? SizeBytes { get; set; }
+    public string StoragePath { get; set; } = string.Empty;
+    public string? PublicUrl { get; set; }
+    public Guid? CreatedBy { get; set; }
+    public string? CreatedByName { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+public class IntegrationEntity
+{
+    public Guid Id { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public string Provider { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string Status { get; set; } = "disconnected";
+    public string ConfigJson { get; set; } = "{}";
+    public DateTime? ConnectedAt { get; set; }
+    public DateTime? DisconnectedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+public class IntegrationSecretEntity
+{
+    public Guid Id { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public string Provider { get; set; } = string.Empty;
+    public string SecretKey { get; set; } = string.Empty;
+    public string Ciphertext { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+public class PlatformHelpArticleEntity
+{
+    public Guid Id { get; set; }
+    public string Slug { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string Body { get; set; } = string.Empty;
+    public string Category { get; set; } = "general";
+    public string Status { get; set; } = "published";
+    public int SortOrder { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+public class ReportRunEntity
+{
+    public Guid Id { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public string ReportType { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public string ParamsJson { get; set; } = "{}";
+    public int RowCount { get; set; }
+    public string CsvContent { get; set; } = string.Empty;
+    public string? CreatedByName { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+public class ImChannelEntity
+{
+    public Guid Id { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string ChannelType { get; set; } = "channel";
+    public Guid? CreatedBy { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+public class ImMessageEntity
+{
+    public Guid Id { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public Guid ChannelId { get; set; }
+    public Guid? SenderUserId { get; set; }
+    public string SenderName { get; set; } = string.Empty;
+    public string Body { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+}
+
+public class AssetEntity
+{
+    public Guid Id { get; set; }
+    public string TenantId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string AssetType { get; set; } = "hardware";
+    public string? SerialOrKey { get; set; }
+    public string Status { get; set; } = "available";
+    public Guid? AssignedUserId { get; set; }
+    public string? AssignedUserName { get; set; }
+    public DateOnly? RenewalDate { get; set; }
+    public string? Notes { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
 }

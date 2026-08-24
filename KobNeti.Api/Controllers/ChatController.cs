@@ -12,11 +12,13 @@ namespace KobNeti.Api.Controllers;
 public class ChatController : ApiControllerBase
 {
     private readonly IChatService _chatService;
+    private readonly IHelpService _helpService;
     private readonly ITenantContextAccessor _tenant;
 
-    public ChatController(IChatService chatService, ITenantContextAccessor tenant)
+    public ChatController(IChatService chatService, IHelpService helpService, ITenantContextAccessor tenant)
     {
         _chatService = chatService;
+        _helpService = helpService;
         _tenant = tenant;
     }
 
@@ -87,6 +89,21 @@ public class ChatController : ApiControllerBase
     public async Task<ActionResult<Response<ChatSessionDTO>>> GetSession(Guid sessionId)
     {
         var result = await _chatService.GetSessionAsync(RequireTenantId(_tenant), sessionId);
+        return HandleResponse(result);
+    }
+
+    /// <summary>W2.13 — Convert a live chat session into an ops ticket.</summary>
+    [HttpPost("session/{sessionId:guid}/convert-to-ticket")]
+    [Authorize(Policy = AdminAuthorizationPolicies.AdminSupport)]
+    public async Task<ActionResult<Response<SupportTicketDTO>>> ConvertToTicket(
+        Guid sessionId,
+        [FromBody] ConvertChatToTicketDTO? request)
+    {
+        var result = await _helpService.CreateTicketFromChatAsync(
+            RequireTenantId(_tenant),
+            sessionId,
+            request?.Category,
+            request?.Subject);
         return HandleResponse(result);
     }
 }

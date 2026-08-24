@@ -4,7 +4,7 @@ using KobNeti.Api.Shared;
 namespace KobNeti.Api.Services;
 
 /// <summary>
-/// Proxies Help ticket/KB admin reads to upstream (MuuqWearApi) when configured.
+/// Emergency-only Help bridge. W3.5+: not registered in DI.
 /// </summary>
 public class BridgingHelpService : IHelpService
 {
@@ -69,6 +69,15 @@ public class BridgingHelpService : IHelpService
             ? _upstream.ForwardAsync<SupportTicketDTO>(
                 tenantId, $"api/Help/admin/tickets/{ticketId}/assign-me", HttpMethod.Post)
             : _local.AssignTicketToMeAsync(tenantId, ticketId, userId, userName);
+
+    public Task<Response<SupportTicketDTO>> CreateTicketFromChatAsync(
+        string tenantId, Guid sessionId, string? category, string? subject) =>
+        // Always ops-owned ticket; session must exist in local store (W2.10 migrates bridged chat).
+        _local.CreateTicketFromChatAsync(tenantId, sessionId, category, subject);
+
+    public Task<Response<List<HelpArticleDTO>>> SuggestArticlesForTicketAsync(
+        string tenantId, Guid ticketId, int limit = 5) =>
+        _local.SuggestArticlesForTicketAsync(tenantId, ticketId, limit);
 
     public async Task<Response<TicketStatsDTO>> GetTicketStatsAsync(string tenantId)
     {

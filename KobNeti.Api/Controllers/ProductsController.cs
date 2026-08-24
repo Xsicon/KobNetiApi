@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using KobNeti.Api.Auth;
 using KobNeti.Api.DTOs;
 using KobNeti.Api.Products;
+using KobNeti.Api.Services;
 using KobNeti.Api.Shared;
 using KobNeti.Api.Tenancy;
 
@@ -77,6 +78,24 @@ public class ProductsController : ApiControllerBase
         }, "Widget snippet"));
     }
 
+    [HttpPatch("{slug}/github-repo")]
+    [Authorize(Policy = AdminAuthorizationPolicies.PlatformAdmin)]
+    public async Task<ActionResult<Response<ProductDTO>>> UpdateGithubRepo(
+        string slug, [FromBody] UpdateProductGithubRepoDTO request, CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(request.GithubRepoUrl) &&
+            !GithubReadService.TryParseRepo(request.GithubRepoUrl, out _, out _))
+        {
+            return BadRequest(Response<ProductDTO>.Fail("Invalid GitHub repo URL"));
+        }
+
+        var updated = await _registry.UpdateGithubRepoUrlAsync(slug, request.GithubRepoUrl, ct);
+        if (updated is null)
+            return NotFound(Response<ProductDTO>.Fail("Product not found"));
+
+        return Ok(Response<ProductDTO>.SuccessResponse(ToDto(updated), "GitHub repo updated"));
+    }
+
     private static ProductDTO ToDto(ProductRecord p) => new()
     {
         Id = p.Id,
@@ -87,6 +106,7 @@ public class ProductsController : ApiControllerBase
         SupportTier = p.SupportTier,
         PublicKey = p.PublicKey,
         PublicHelpCenterUrl = p.PublicHelpCenterUrl ?? "",
+        GithubRepoUrl = p.GithubRepoUrl,
         Enabled = p.Enabled
     };
 }

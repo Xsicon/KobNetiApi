@@ -54,14 +54,30 @@ else
 builder.Services.AddSingleton<ITenantResolver, ProductTenantResolver>();
 
 builder.Services.AddSingleton<UpstreamApiClient>();
-builder.Services.AddScoped<ChatService>();
-builder.Services.AddScoped<IChatService, BridgingChatService>();
-builder.Services.AddScoped<HelpService>();
-builder.Services.AddScoped<IHelpService, BridgingHelpService>();
+builder.Services.AddScoped<IChatService, ChatService>();
+builder.Services.AddScoped<IHelpService, HelpService>();
 builder.Services.AddScoped<IMacroService, MacroService>();
-builder.Services.AddScoped<SupportCountsService>();
-builder.Services.AddScoped<ISupportCountsService, BridgingSupportCountsService>();
+builder.Services.AddScoped<ISupportCountsService, SupportCountsService>();
 builder.Services.AddScoped<IAgentTokenService, AgentTokenService>();
+builder.Services.AddScoped<INotificationStub, AppNotificationService>();
+builder.Services.AddScoped<IAppNotificationService>(sp => (AppNotificationService)sp.GetRequiredService<INotificationStub>());
+builder.Services.AddScoped<IAuditService, AuditService>();
+builder.Services.AddScoped<IIncidentService, IncidentService>();
+builder.Services.AddScoped<IEngTaskService, EngTaskService>();
+builder.Services.AddScoped<IMilestoneService, MilestoneService>();
+builder.Services.AddHttpClient("github-readonly");
+builder.Services.AddScoped<IGithubReadService, GithubReadService>();
+builder.Services.AddScoped<ICalendarOpsService, CalendarOpsService>();
+builder.Services.AddScoped<IOpsFileService, OpsFileService>();
+builder.Services.AddScoped<IIntegrationService, IntegrationService>();
+builder.Services.AddScoped<ITimeTrackingService, TimeTrackingService>();
+builder.Services.AddScoped<IApprovalService, ApprovalService>();
+builder.Services.AddScoped<IPayrollService, PayrollService>();
+builder.Services.AddScoped<IOverviewService, OverviewService>();
+builder.Services.AddScoped<IReportService, ReportService>();
+builder.Services.AddScoped<IPlatformHelpService, PlatformHelpService>();
+builder.Services.AddScoped<IInternalChatService, InternalChatService>();
+builder.Services.AddScoped<IAssetService, AssetService>();
 
 builder.Services
     .AddAuthentication(TenantJwtAuthenticationHandler.SchemeName)
@@ -124,6 +140,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors();
+app.UseDefaultFiles();
+app.UseStaticFiles();
 app.UseExceptionHandler(err =>
 {
     err.Run(async context =>

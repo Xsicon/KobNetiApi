@@ -4,8 +4,8 @@ using KobNeti.Api.Shared;
 namespace KobNeti.Api.Services;
 
 /// <summary>
-/// For tenants with UpstreamApiBaseUrl (e.g. muuqwear → MuuqWearApi),
-/// forwards Chat calls so Support Hub can see live storefront chats.
+/// Emergency-only: forwards Chat to UpstreamApiBaseUrl when re-registered in DI.
+/// W3.5+: not registered; ops store is source of truth.
 /// </summary>
 public class BridgingChatService : IChatService
 {

@@ -19,6 +19,7 @@ public class SbProduct : BaseModel
     [Column("jwt_secret")] public string? JwtSecret { get; set; }
     [Column("upstream_api_base_url")] public string? UpstreamApiBaseUrl { get; set; }
     [Column("public_help_center_url")] public string? PublicHelpCenterUrl { get; set; }
+    [Column("github_repo_url")] public string? GithubRepoUrl { get; set; }
     [Column("enabled")] public bool Enabled { get; set; } = true;
     [Column("created_at")] public DateTime CreatedAt { get; set; }
     [Column("updated_at")] public DateTime UpdatedAt { get; set; }
@@ -141,6 +142,33 @@ public class SupabaseProductRegistry : IProductRegistry
         }
     }
 
+    public async Task<ProductRecord?> UpdateGithubRepoUrlAsync(string slug, string? githubRepoUrl, CancellationToken ct = default)
+    {
+        try
+        {
+            var response = await _client.From<SbProduct>()
+                .Filter("slug", Operator.Equals, slug)
+                .Get();
+
+            var row = (response.Models ?? []).FirstOrDefault();
+            if (row is null)
+                return await _configFallback.UpdateGithubRepoUrlAsync(slug, githubRepoUrl, ct);
+
+            row.GithubRepoUrl = string.IsNullOrWhiteSpace(githubRepoUrl) ? null : githubRepoUrl.Trim();
+            row.UpdatedAt = DateTime.UtcNow;
+            await _client.From<SbProduct>()
+                .Filter("id", Operator.Equals, row.Id.ToString())
+                .Update(row);
+
+            return OverlayConfigSecrets([ToRecord(row)]).First();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Product registry UpdateGithubRepoUrl failed for {Slug}", slug);
+            return await _configFallback.UpdateGithubRepoUrlAsync(slug, githubRepoUrl, ct);
+        }
+    }
+
     private IReadOnlyList<ProductRecord> OverlayConfigSecrets(List<ProductRecord> rows)
     {
         foreach (var row in rows)
@@ -172,6 +200,7 @@ public class SupabaseProductRegistry : IProductRegistry
         JwtSecret = m.JwtSecret,
         UpstreamApiBaseUrl = m.UpstreamApiBaseUrl,
         PublicHelpCenterUrl = m.PublicHelpCenterUrl,
+        GithubRepoUrl = m.GithubRepoUrl,
         Enabled = m.Enabled,
         CreatedAt = m.CreatedAt,
         UpdatedAt = m.UpdatedAt
