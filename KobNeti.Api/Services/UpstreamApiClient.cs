@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.IdentityModel.Tokens;
 using KobNeti.Api.Auth;
+using KobNeti.Api.DTOs;
 using KobNeti.Api.Shared;
 using KobNeti.Api.Tenancy;
 
@@ -110,6 +111,55 @@ public class UpstreamApiClient
         {
             _logger.LogError(ex, "Upstream forward failed for {Tenant} {Path}", tenantId, relativePath);
             return Response<T>.Fail($"Unable to reach upstream: {ex.Message}");
+        }
+    }
+
+    public async Task<ProductUpstreamStatusDTO> ProbeAsync(string tenantId)
+    {
+        if (!TryGetUpstream(tenantId, out var baseUrl, out _))
+        {
+            return new ProductUpstreamStatusDTO
+            {
+                Configured = false,
+                Reachable = false,
+                Message = "No product API URL configured. Set one in Support → Settings."
+            };
+        }
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(6);
+            using var res = await client.GetAsync(baseUrl!.TrimEnd('/') + "/swagger/index.html");
+            if (res.IsSuccessStatusCode)
+            {
+                return new ProductUpstreamStatusDTO
+                {
+                    Configured = true,
+                    Reachable = true,
+                    UpstreamApiBaseUrl = baseUrl,
+                    Message = "Product API is running."
+                };
+            }
+
+            return new ProductUpstreamStatusDTO
+            {
+                Configured = true,
+                Reachable = false,
+                UpstreamApiBaseUrl = baseUrl,
+                Message = $"Product API returned {(int)res.StatusCode}. Is {baseUrl} correct?"
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Upstream probe failed for {Tenant} at {BaseUrl}", tenantId, baseUrl);
+            return new ProductUpstreamStatusDTO
+            {
+                Configured = true,
+                Reachable = false,
+                UpstreamApiBaseUrl = baseUrl,
+                Message = $"Product API is not reachable at {baseUrl}. Start the product API and try again."
+            };
         }
     }
 

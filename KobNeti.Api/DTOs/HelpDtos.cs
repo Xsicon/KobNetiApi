@@ -272,8 +272,22 @@ public class ProductDTO
     public string SupportTier { get; set; } = string.Empty;
     public string PublicKey { get; set; } = string.Empty;
     public string PublicHelpCenterUrl { get; set; } = string.Empty;
+    public string? UpstreamApiBaseUrl { get; set; }
     public string? GithubRepoUrl { get; set; }
     public bool Enabled { get; set; }
+}
+
+public class UpdateProductUpstreamApiDTO
+{
+    public string? UpstreamApiBaseUrl { get; set; }
+}
+
+public class ProductUpstreamStatusDTO
+{
+    public bool Configured { get; set; }
+    public bool Reachable { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public string? UpstreamApiBaseUrl { get; set; }
 }
 
 public class SupportMacroDTO

@@ -25,6 +25,7 @@ public interface IProductRegistry
     Task<ProductRecord?> GetByPublicKeyAsync(string publicKey, CancellationToken ct = default);
     Task<ProductRecord?> RotatePublicKeyAsync(string slug, CancellationToken ct = default);
     Task<ProductRecord?> UpdateGithubRepoUrlAsync(string slug, string? githubRepoUrl, CancellationToken ct = default);
+    Task<ProductRecord?> UpdateUpstreamApiBaseUrlAsync(string slug, string? upstreamApiBaseUrl, CancellationToken ct = default);
 }
 
 public static class EmbedKeyHelper

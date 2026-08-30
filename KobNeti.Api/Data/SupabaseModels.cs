@@ -31,6 +31,20 @@ public class SbChatMessage : BaseModel
     [Column("created_at")] public DateTime CreatedAt { get; set; }
 }
 
+[Table("support_chat_sticky_notes")]
+public class SbChatStickyNote : BaseModel
+{
+    [PrimaryKey("session_id", false)] public Guid SessionId { get; set; }
+    [Column("tenant_id")] public string TenantId { get; set; } = string.Empty;
+    [Column("agent_name")] public string AgentName { get; set; } = string.Empty;
+    [Column("reason_for_contact")] public string ReasonForContact { get; set; } = string.Empty;
+    [Column("key_actions_taken")] public object KeyActionsTaken { get; set; } = "[]";
+    [Column("color_hex")] public string ColorHex { get; set; } = "#F29D68";
+    [Column("pinned")] public bool Pinned { get; set; }
+    [Column("updated_at")] public DateTime UpdatedAt { get; set; }
+    [Column("updated_by")] public Guid? UpdatedBy { get; set; }
+}
+
 [Table("support_tickets")]
 public class SbTicket : BaseModel
 {
@@ -163,7 +177,7 @@ public class SbUpload : BaseModel
 [Table("support_incidents")]
 public class SbIncident : BaseModel
 {
-    [PrimaryKey("id", false)] public Guid Id { get; set; }
+    [PrimaryKey("id")] public Guid Id { get; set; }
     [Column("tenant_id")] public string TenantId { get; set; } = string.Empty;
     [Column("incident_number")] public string IncidentNumber { get; set; } = string.Empty;
     [Column("title")] public string Title { get; set; } = string.Empty;
@@ -172,6 +186,7 @@ public class SbIncident : BaseModel
     [Column("commander_name")] public string? CommanderName { get; set; }
     [Column("commander_user_id")] public Guid? CommanderUserId { get; set; }
     [Column("source_ticket_id")] public Guid? SourceTicketId { get; set; }
+    [Column("source_chat_session_id")] public Guid? SourceChatSessionId { get; set; }
     [Column("postmortem_notes")] public string? PostmortemNotes { get; set; }
     [Column("created_at")] public DateTime CreatedAt { get; set; }
     [Column("updated_at")] public DateTime UpdatedAt { get; set; }

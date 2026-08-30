@@ -55,15 +55,19 @@ else
 builder.Services.AddSingleton<ITenantResolver, ProductTenantResolver>();
 
 builder.Services.AddSingleton<UpstreamApiClient>();
-builder.Services.AddScoped<IChatService, ChatService>();
-builder.Services.AddScoped<IHelpService, HelpService>();
+builder.Services.AddScoped<ChatService>();
+builder.Services.AddScoped<SupportCountsService>();
+builder.Services.AddScoped<IChatService, BridgingChatService>();
+builder.Services.AddScoped<HelpService>();
+builder.Services.AddScoped<IHelpService, BridgingHelpService>();
 builder.Services.AddScoped<IMacroService, MacroService>();
-builder.Services.AddScoped<ISupportCountsService, SupportCountsService>();
+builder.Services.AddScoped<ISupportCountsService, BridgingSupportCountsService>();
 builder.Services.AddScoped<IAgentTokenService, AgentTokenService>();
 builder.Services.AddScoped<INotificationStub, AppNotificationService>();
 builder.Services.AddScoped<IAppNotificationService>(sp => (AppNotificationService)sp.GetRequiredService<INotificationStub>());
 builder.Services.AddScoped<IAuditService, AuditService>();
-builder.Services.AddScoped<IIncidentService, IncidentService>();
+builder.Services.AddScoped<IncidentService>();
+builder.Services.AddScoped<IIncidentService, BridgingIncidentService>();
 builder.Services.AddScoped<IEngTaskService, EngTaskService>();
 builder.Services.AddScoped<IMilestoneService, MilestoneService>();
 builder.Services.AddHttpClient("github-readonly");

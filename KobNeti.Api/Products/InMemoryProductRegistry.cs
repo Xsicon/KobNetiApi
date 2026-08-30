@@ -94,6 +94,23 @@ public class InMemoryProductRegistry : IProductRegistry
         }
     }
 
+    public Task<ProductRecord?> UpdateUpstreamApiBaseUrlAsync(string slug, string? upstreamApiBaseUrl, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            var hit = _products.FirstOrDefault(p =>
+                string.Equals(p.Slug, slug, StringComparison.OrdinalIgnoreCase));
+            if (hit is null)
+                return Task.FromResult<ProductRecord?>(null);
+
+            hit.UpstreamApiBaseUrl = string.IsNullOrWhiteSpace(upstreamApiBaseUrl)
+                ? null
+                : upstreamApiBaseUrl.Trim().TrimEnd('/');
+            hit.UpdatedAt = DateTime.UtcNow;
+            return Task.FromResult(Clone(hit));
+        }
+    }
+
     private static ProductRecord? Clone(ProductRecord? p) =>
         p is null
             ? null

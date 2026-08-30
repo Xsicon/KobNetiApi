@@ -77,6 +77,63 @@ public class SupabaseSupportStore : ISupportStore
         return response.Models.Select(ToEntity).ToList();
     }
 
+    public async Task<ChatStickyNoteEntity?> GetChatStickyNoteAsync(string tenantId, Guid sessionId)
+    {
+        try
+        {
+            var response = await _client.From<SbChatStickyNote>()
+                .Filter("tenant_id", Operator.Equals, tenantId)
+                .Filter("session_id", Operator.Equals, sessionId.ToString())
+                .Get();
+            var model = response.Models.FirstOrDefault();
+            return model is null ? null : ToEntity(model);
+        }
+        catch (Exception ex) when (IsMissingStickyNotesTable(ex))
+        {
+            return null;
+        }
+    }
+
+    public async Task<ChatStickyNoteEntity> UpsertChatStickyNoteAsync(ChatStickyNoteEntity note)
+    {
+        try
+        {
+            var existing = await GetChatStickyNoteAsync(note.TenantId, note.SessionId);
+            if (existing is null)
+            {
+                var inserted = await _client.From<SbChatStickyNote>().Insert(ToSb(note));
+                var model = inserted.Models.FirstOrDefault();
+                return model is null ? note : ToEntity(model);
+            }
+
+            await _client.From<SbChatStickyNote>()
+                .Filter("tenant_id", Operator.Equals, note.TenantId)
+                .Filter("session_id", Operator.Equals, note.SessionId.ToString())
+                .Update(ToSb(note));
+            return note;
+        }
+        catch (Exception ex) when (IsMissingStickyNotesTable(ex))
+        {
+            throw new InvalidOperationException(
+                "Sticky notes storage is not set up. Apply supabase/support_w2_chat_sticky_notes.sql to your database.");
+        }
+    }
+
+    public async Task DeleteChatStickyNoteAsync(string tenantId, Guid sessionId)
+    {
+        try
+        {
+            await _client.From<SbChatStickyNote>()
+                .Filter("tenant_id", Operator.Equals, tenantId)
+                .Filter("session_id", Operator.Equals, sessionId.ToString())
+                .Delete();
+        }
+        catch (Exception ex) when (IsMissingStickyNotesTable(ex))
+        {
+            // Nothing to delete if storage was never provisioned.
+        }
+    }
+
     public async Task<TicketEntity> InsertTicketAsync(TicketEntity ticket)
     {
         var response = await _client.From<SbTicket>().Insert(ToSb(ticket));
@@ -372,8 +429,9 @@ public class SupabaseSupportStore : ISupportStore
     public async Task<IncidentEntity> InsertIncidentAsync(IncidentEntity incident)
     {
         var response = await _client.From<SbIncident>().Insert(ToSb(incident));
-        var model = response.Models.FirstOrDefault();
-        return model is null ? incident : ToEntity(model);
+        var model = response.Models.FirstOrDefault()
+                    ?? throw new InvalidOperationException("Incident insert did not return a row.");
+        return ToEntity(model);
     }
 
     public async Task<IncidentEntity?> GetIncidentAsync(string tenantId, Guid incidentId)
@@ -1084,6 +1142,53 @@ public class SupabaseSupportStore : ISupportStore
         CreatedAt = m.CreatedAt
     };
 
+    private static ChatStickyNoteEntity ToEntity(SbChatStickyNote m) => new()
+    {
+        TenantId = m.TenantId,
+        SessionId = m.SessionId,
+        AgentName = m.AgentName,
+        ReasonForContact = m.ReasonForContact,
+        KeyActionsJson = SerializeKeyActions(m.KeyActionsTaken),
+        ColorHex = m.ColorHex,
+        Pinned = m.Pinned,
+        UpdatedAt = m.UpdatedAt,
+        UpdatedBy = m.UpdatedBy
+    };
+
+    private static SbChatStickyNote ToSb(ChatStickyNoteEntity e) => new()
+    {
+        TenantId = e.TenantId,
+        SessionId = e.SessionId,
+        AgentName = e.AgentName,
+        ReasonForContact = e.ReasonForContact,
+        KeyActionsTaken = DeserializeKeyActions(e.KeyActionsJson),
+        ColorHex = e.ColorHex,
+        Pinned = e.Pinned,
+        UpdatedAt = e.UpdatedAt,
+        UpdatedBy = e.UpdatedBy
+    };
+
+    private static string SerializeKeyActions(object? value)
+    {
+        if (value is null)
+            return "[]";
+        if (value is string s)
+            return string.IsNullOrWhiteSpace(s) ? "[]" : s;
+        return System.Text.Json.JsonSerializer.Serialize(value);
+    }
+
+    private static object DeserializeKeyActions(string json)
+    {
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<List<string>>(json) ?? [];
+        }
+        catch
+        {
+            return new List<string>();
+        }
+    }
+
     private static SbChatMessage ToSb(ChatMessageEntity e) => new()
     {
         Id = e.Id,
@@ -1348,6 +1453,7 @@ public class SupabaseSupportStore : ISupportStore
         CommanderName = m.CommanderName,
         CommanderUserId = m.CommanderUserId,
         SourceTicketId = m.SourceTicketId,
+        SourceChatSessionId = m.SourceChatSessionId,
         PostmortemNotes = m.PostmortemNotes,
         CreatedAt = m.CreatedAt,
         UpdatedAt = m.UpdatedAt,
@@ -1365,6 +1471,7 @@ public class SupabaseSupportStore : ISupportStore
         CommanderName = e.CommanderName,
         CommanderUserId = e.CommanderUserId,
         SourceTicketId = e.SourceTicketId,
+        SourceChatSessionId = e.SourceChatSessionId,
         PostmortemNotes = e.PostmortemNotes,
         CreatedAt = e.CreatedAt,
         UpdatedAt = e.UpdatedAt,
@@ -1783,4 +1890,13 @@ public class SupabaseSupportStore : ISupportStore
         Notes = e.Notes,
         CreatedAt = e.CreatedAt, UpdatedAt = e.UpdatedAt
     };
+
+    private static bool IsMissingStickyNotesTable(Exception ex)
+    {
+        var text = ex.ToString();
+        return text.Contains("support_chat_sticky_notes", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("42P01", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("PGRST205", StringComparison.OrdinalIgnoreCase)
+               || text.Contains("Could not find the table", StringComparison.OrdinalIgnoreCase);
+    }
 }

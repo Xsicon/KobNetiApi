@@ -254,11 +254,56 @@ public class HelpService : IHelpService
             return Response<SupportTicketDTO>.Fail("Chat session not found");
 
         var messages = await _store.ListMessagesAsync(tenantId, sessionId);
+        var name = string.IsNullOrWhiteSpace(session.GuestName) ? "Chat visitor" : session.GuestName.Trim();
+        var email = string.IsNullOrWhiteSpace(session.GuestEmail) ? "unknown@chat.local" : session.GuestEmail.Trim();
+        return await CreateTicketFromChatCoreAsync(
+            tenantId,
+            sessionId,
+            name,
+            email,
+            session.ExternalCustomerId,
+            messages.Select(m => (m.SenderType, (string?)m.SenderName, m.Message)),
+            category,
+            subject);
+    }
+
+    /// <summary>
+    /// Creates an ops-owned ticket from a bridged product-API chat session (no local session row required).
+    /// </summary>
+    public Task<Response<SupportTicketDTO>> CreateTicketFromChatAsync(
+        string tenantId,
+        Guid sessionId,
+        ChatSessionDTO session,
+        IReadOnlyList<ChatMessageDTO> messages,
+        string? category,
+        string? subject)
+    {
+        var name = string.IsNullOrWhiteSpace(session.CustomerName) ? "Chat visitor" : session.CustomerName.Trim();
+        var email = string.IsNullOrWhiteSpace(session.CustomerEmail) ? "unknown@chat.local" : session.CustomerEmail.Trim();
+        return CreateTicketFromChatCoreAsync(
+            tenantId,
+            sessionId,
+            name,
+            email,
+            externalCustomerId: null,
+            messages.Select(m => (m.SenderType, (string?)m.SenderName, m.Message)),
+            category,
+            subject);
+    }
+
+    private async Task<Response<SupportTicketDTO>> CreateTicketFromChatCoreAsync(
+        string tenantId,
+        Guid sessionId,
+        string name,
+        string email,
+        Guid? externalCustomerId,
+        IEnumerable<(string SenderType, string? SenderName, string Message)> messages,
+        string? category,
+        string? subject)
+    {
         var transcript = string.Join("\n", messages.Select(m =>
             $"[{m.SenderType}] {m.SenderName ?? "Unknown"}: {m.Message}"));
 
-        var name = string.IsNullOrWhiteSpace(session.GuestName) ? "Chat visitor" : session.GuestName.Trim();
-        var email = string.IsNullOrWhiteSpace(session.GuestEmail) ? "unknown@chat.local" : session.GuestEmail.Trim();
         var cat = string.IsNullOrWhiteSpace(category) ? "chat" : category.Trim();
         var subj = string.IsNullOrWhiteSpace(subject)
             ? $"Chat conversation {sessionId.ToString()[..8]}"
@@ -284,7 +329,7 @@ public class HelpService : IHelpService
                 : transcript,
             Priority = TicketPriority.FromCategory(cat),
             Status = TicketStatus.New,
-            ExternalCustomerId = session.ExternalCustomerId,
+            ExternalCustomerId = externalCustomerId,
             ChatSessionId = sessionId,
             SlaFirstResponseMinutes = frMinutes,
             FirstResponseDueAt = now.AddMinutes(frMinutes),

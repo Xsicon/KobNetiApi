@@ -39,6 +39,9 @@ public class InMemorySupportStore : ISupportStore
     private readonly ConcurrentDictionary<string, int> _ticketSeq = new();
     private readonly ConcurrentDictionary<string, int> _incidentSeq = new();
     private readonly ConcurrentDictionary<string, int> _engTaskSeq = new();
+    private readonly ConcurrentDictionary<string, ChatStickyNoteEntity> _chatStickyNotes = new();
+
+    private static string StickyKey(string tenantId, Guid sessionId) => $"{tenantId}|{sessionId}";
 
     public Task<ChatSessionEntity?> GetSessionAsync(string tenantId, Guid sessionId)
     {
@@ -86,6 +89,25 @@ public class InMemorySupportStore : ISupportStore
             .Where(m => m.TenantId == tenantId && set.Contains(m.SessionId))
             .Select(Clone)
             .ToList());
+    }
+
+    public Task<ChatStickyNoteEntity?> GetChatStickyNoteAsync(string tenantId, Guid sessionId)
+    {
+        _chatStickyNotes.TryGetValue(StickyKey(tenantId, sessionId), out var note);
+        return Task.FromResult(note is not null ? Clone(note) : null);
+    }
+
+    public Task<ChatStickyNoteEntity> UpsertChatStickyNoteAsync(ChatStickyNoteEntity note)
+    {
+        var copy = Clone(note);
+        _chatStickyNotes[StickyKey(note.TenantId, note.SessionId)] = copy;
+        return Task.FromResult(Clone(copy));
+    }
+
+    public Task DeleteChatStickyNoteAsync(string tenantId, Guid sessionId)
+    {
+        _chatStickyNotes.TryRemove(StickyKey(tenantId, sessionId), out _);
+        return Task.CompletedTask;
     }
 
     public Task<TicketEntity> InsertTicketAsync(TicketEntity ticket)

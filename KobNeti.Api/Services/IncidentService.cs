@@ -31,6 +31,7 @@ public interface IIncidentService
     Task<Response<IncidentDTO>> GetAsync(string tenantId, Guid id);
     Task<Response<IncidentDTO>> CreateAsync(string tenantId, CreateIncidentDTO request, string? actorName, Guid? actorUserId);
     Task<Response<IncidentDTO>> EscalateFromTicketAsync(string tenantId, Guid ticketId, EscalateTicketDTO request, string? actorName, Guid? actorUserId);
+    Task<Response<IncidentDTO>> EscalateFromChatAsync(string tenantId, Guid sessionId, EscalateFromChatDTO request, string? actorName, Guid? actorUserId);
     Task<Response<IncidentDTO>> UpdateAsync(string tenantId, Guid id, UpdateIncidentDTO request, string? actorName);
 }
 
@@ -97,10 +98,11 @@ public class IncidentService : IIncidentService
             CommanderName = string.IsNullOrWhiteSpace(request.CommanderName) ? actorName : request.CommanderName.Trim(),
             CommanderUserId = actorUserId,
             SourceTicketId = request.SourceTicketId,
+            SourceChatSessionId = request.SourceChatSessionId,
             CreatedAt = now,
             UpdatedAt = now
         };
-        await _store.InsertIncidentAsync(incident);
+        incident = await _store.InsertIncidentAsync(incident);
         await AddEventAsync(tenantId, incident.Id, "created", actorName, $"Severity {severity}");
         await NotifyAssigneesAsync(tenantId, incident, "Incident created");
         return Response<IncidentDTO>.SuccessResponse(await MapAsync(tenantId, incident, true), "Incident created");
@@ -152,6 +154,160 @@ public class IncidentService : IIncidentService
             actorUserId, actorName, null, new { ticketId, created.Data.IncidentNumber });
 
         return await GetAsync(tenantId, created.Data.Id);
+    }
+
+    public async Task<Response<IncidentDTO>> EscalateFromChatAsync(
+        string tenantId, Guid sessionId, EscalateFromChatDTO request, string? actorName, Guid? actorUserId)
+    {
+        var session = await _store.GetSessionAsync(tenantId, sessionId);
+        if (session is null)
+            return Response<IncidentDTO>.Fail("Chat session not found");
+
+        var messages = await _store.ListMessagesAsync(tenantId, sessionId);
+        var customerName = string.IsNullOrWhiteSpace(session.GuestName) ? "Chat visitor" : session.GuestName.Trim();
+        return await EscalateFromChatCoreAsync(
+            tenantId,
+            sessionId,
+            customerName,
+            messages.Select(m => (m.SenderType, (string?)m.SenderName, m.Message)),
+            request,
+            actorName,
+            actorUserId);
+    }
+
+    /// <summary>
+    /// Creates an ops-owned incident from a bridged product-API chat session.
+    /// </summary>
+    public Task<Response<IncidentDTO>> EscalateFromChatAsync(
+        string tenantId,
+        Guid sessionId,
+        ChatSessionDTO session,
+        IReadOnlyList<ChatMessageDTO> messages,
+        EscalateFromChatDTO request,
+        string? actorName,
+        Guid? actorUserId)
+    {
+        var customerName = string.IsNullOrWhiteSpace(session.CustomerName) ? "Chat visitor" : session.CustomerName.Trim();
+        return EscalateFromChatCoreAsync(
+            tenantId,
+            sessionId,
+            customerName,
+            messages.Select(m => (m.SenderType, (string?)m.SenderName, m.Message)),
+            request,
+            actorName,
+            actorUserId);
+    }
+
+    private async Task<Response<IncidentDTO>> EscalateFromChatCoreAsync(
+        string tenantId,
+        Guid sessionId,
+        string customerName,
+        IEnumerable<(string SenderType, string? SenderName, string Message)> messages,
+        EscalateFromChatDTO request,
+        string? actorName,
+        Guid? actorUserId)
+    {
+        if (string.IsNullOrWhiteSpace(request.Reason))
+            return Response<IncidentDTO>.Fail("Reason for escalation is required");
+
+        var target = NormalizeEscalationTarget(request.Target);
+        var targetLabel = GetEscalationTargetLabel(target, request.AssigneeName);
+        var incidentSeverity = MapUiSeverityToIncident(request.Severity);
+        var title = string.IsNullOrWhiteSpace(request.Title)
+            ? $"Escalation: {customerName} → {targetLabel}"
+            : request.Title.Trim();
+
+        var commanderName = target switch
+        {
+            "agent" => string.IsNullOrWhiteSpace(request.AssigneeName) ? actorName : request.AssigneeName.Trim(),
+            "support_manager" => "Support Manager",
+            _ => actorName
+        };
+        var commanderUserId = target == "agent" ? request.AssigneeUserId : actorUserId;
+
+        var transcript = string.Join(
+            "\n",
+            messages
+                .TakeLast(30)
+                .Select(m => $"[{m.SenderType}] {m.SenderName ?? "Unknown"}: {m.Message}"));
+
+        var postmortem = $"Reason: {request.Reason.Trim()}\nTarget: {targetLabel}\nSeverity: {request.Severity.Trim()}";
+        if (!string.IsNullOrWhiteSpace(transcript))
+            postmortem += $"\n\nChat transcript:\n{transcript}";
+
+        var now = DateTime.UtcNow;
+        var seq = await _store.NextIncidentSequenceAsync(tenantId);
+        var incident = new IncidentEntity
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            IncidentNumber = $"INC-{now:yyyyMMdd}-{seq:D4}",
+            Title = title.Length > 240 ? title[..240] : title,
+            Severity = incidentSeverity,
+            Status = IncidentStatus.Open,
+            CommanderName = commanderName,
+            CommanderUserId = commanderUserId,
+            SourceChatSessionId = sessionId,
+            PostmortemNotes = postmortem,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        incident = await _store.InsertIncidentAsync(incident);
+        await AddEventAsync(tenantId, incident.Id, "created", actorName, $"Severity {incidentSeverity}");
+        await AddEventAsync(
+            tenantId,
+            incident.Id,
+            "escalated_from_chat",
+            actorName,
+            $"Target: {targetLabel}; Reason: {request.Reason.Trim()}");
+        await NotifyAssigneesAsync(tenantId, incident, "Chat escalation");
+        await _audit.WriteAsync(
+            tenantId,
+            AuditActions.IncidentEscalate,
+            "incident",
+            incident.Id.ToString(),
+            actorUserId,
+            actorName,
+            null,
+            new { sessionId, incident.IncidentNumber, target, request.Severity });
+
+        return Response<IncidentDTO>.SuccessResponse(await MapAsync(tenantId, incident, true), "Incident created from chat");
+    }
+
+    private static string NormalizeEscalationTarget(string? target)
+    {
+        var value = (target ?? "engineering").Trim().ToLowerInvariant();
+        return value switch
+        {
+            "support_manager" or "support-manager" or "manager" => "support_manager",
+            "agent" or "specific_agent" => "agent",
+            _ => "engineering"
+        };
+    }
+
+    private static string GetEscalationTargetLabel(string target, string? assigneeName) =>
+        target switch
+        {
+            "support_manager" => "Support Team (Manager)",
+            "agent" => string.IsNullOrWhiteSpace(assigneeName)
+                ? "Specific Agent"
+                : $"Agent: {assigneeName.Trim()}",
+            _ => "Engineering Team"
+        };
+
+    private static string MapUiSeverityToIncident(string? severity)
+    {
+        var value = (severity ?? "High").Trim();
+        return value.ToLowerInvariant() switch
+        {
+            "urgent" => IncidentSeverity.Sev1,
+            "high" => IncidentSeverity.Sev2,
+            "medium" => IncidentSeverity.Sev3,
+            "low" => IncidentSeverity.Sev4,
+            IncidentSeverity.Sev1 or IncidentSeverity.Sev2 or IncidentSeverity.Sev3 or IncidentSeverity.Sev4 => value.ToLowerInvariant(),
+            _ => IncidentSeverity.Sev2
+        };
     }
 
     public async Task<Response<IncidentDTO>> UpdateAsync(
@@ -245,6 +401,7 @@ public class IncidentService : IIncidentService
             CommanderName = i.CommanderName,
             CommanderUserId = i.CommanderUserId,
             SourceTicketId = i.SourceTicketId,
+            SourceChatSessionId = i.SourceChatSessionId,
             PostmortemNotes = i.PostmortemNotes,
             CreatedAt = i.CreatedAt,
             UpdatedAt = i.UpdatedAt,

@@ -16,26 +16,28 @@ public class BridgingSupportCountsService : ISupportCountsService
 
     public async Task<Response<SupportCountsDTO>> GetCountsAsync(string tenantId)
     {
-        if (!_upstream.TryGetUpstream(tenantId, out _, out _))
-            return await _local.GetCountsAsync(tenantId);
-
-        var sessions = await _upstream.ForwardAsync<List<ChatSessionDTO>>(
-            tenantId, "api/Chat/active-sessions", HttpMethod.Get, mintAdminToken: true);
-        var stats = await _upstream.ForwardAsync<TicketStatsDTO>(
-            tenantId, "api/Help/admin/stats", HttpMethod.Get, mintAdminToken: true);
-
-        if (!sessions.Success && !stats.Success)
-            return await _local.GetCountsAsync(tenantId);
-
-        var activeChats = sessions.Success ? sessions.Data?.Count ?? 0 : 0;
-        var openTickets = stats.Success
-            ? (stats.Data?.OpenCount ?? 0) + (stats.Data?.InProgressCount ?? 0)
-            : 0;
-
-        return Response<SupportCountsDTO>.SuccessResponse(new SupportCountsDTO
+        if (_upstream.TryGetUpstream(tenantId, out _, out _))
         {
-            ActiveChats = activeChats,
-            OpenTickets = openTickets
-        }, "Counts loaded from upstream");
+            var sessions = await _upstream.ForwardAsync<List<ChatSessionDTO>>(
+                tenantId, "api/Chat/active-sessions", HttpMethod.Get, mintAdminToken: true);
+            var stats = await _upstream.ForwardAsync<TicketStatsDTO>(
+                tenantId, "api/Help/admin/stats", HttpMethod.Get, mintAdminToken: true);
+
+            if (sessions.Success || stats.Success)
+            {
+                return Response<SupportCountsDTO>.SuccessResponse(new SupportCountsDTO
+                {
+                    ActiveChats = sessions.Success ? sessions.Data?.Count ?? 0 : 0,
+                    OpenTickets = stats.Success
+                        ? (stats.Data?.OpenCount ?? 0) + (stats.Data?.InProgressCount ?? 0)
+                        : 0
+                }, "Counts loaded from product API");
+            }
+
+            return Response<SupportCountsDTO>.Fail(
+                sessions.Message ?? stats.Message ?? "Product API is not reachable.");
+        }
+
+        return await _local.GetCountsAsync(tenantId);
     }
 }

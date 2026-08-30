@@ -55,6 +55,17 @@ public class IncidentsController : ApiControllerBase
             AdminRoleClaims.GetDisplayName(User),
             AdminRoleClaims.GetUserId(User)));
 
+    [HttpPost("from-chat/{sessionId:guid}")]
+    public async Task<ActionResult<Response<IncidentDTO>>> EscalateFromChat(
+        Guid sessionId,
+        [FromBody] EscalateFromChatDTO request) =>
+        HandleResponse(await _incidents.EscalateFromChatAsync(
+            RequireTenantId(_tenant),
+            sessionId,
+            request,
+            AdminRoleClaims.GetDisplayName(User),
+            AdminRoleClaims.GetUserId(User)));
+
     [HttpPatch("{id:guid}")]
     public async Task<ActionResult<Response<IncidentDTO>>> Update(Guid id, [FromBody] UpdateIncidentDTO request) =>
         HandleResponse(await _incidents.UpdateAsync(

@@ -12,6 +12,9 @@ public interface IChatService
     Task<Response<bool>> CloseSessionAsync(string tenantId, Guid sessionId);
     Task<Response<string>> GetSessionStatusAsync(string tenantId, Guid sessionId, Guid? userId, bool isAdmin);
     Task<Response<ChatSessionDTO>> GetSessionAsync(string tenantId, Guid sessionId);
+    Task<Response<ChatStickyNoteDTO?>> GetStickyNoteAsync(string tenantId, Guid sessionId);
+    Task<Response<ChatStickyNoteDTO>> SaveStickyNoteAsync(string tenantId, Guid sessionId, SaveChatStickyNoteDTO dto, Guid? updatedBy);
+    Task<Response<bool>> DeleteStickyNoteAsync(string tenantId, Guid sessionId);
 }
 
 public class ChatService : IChatService
@@ -225,6 +228,100 @@ public class ChatService : IChatService
             _logger.LogError(ex, "GetSession failed");
             return Response<ChatSessionDTO>.Fail("Unable to load session.");
         }
+    }
+
+    public async Task<Response<ChatStickyNoteDTO?>> GetStickyNoteAsync(string tenantId, Guid sessionId)
+    {
+        try
+        {
+            var entity = await _store.GetChatStickyNoteAsync(tenantId, sessionId);
+            return Response<ChatStickyNoteDTO?>.SuccessResponse(
+                entity is null ? null : ToStickyNoteDto(entity),
+                entity is null ? "No sticky note" : "Sticky note loaded");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GetStickyNote failed for {SessionId}", sessionId);
+            return Response<ChatStickyNoteDTO?>.Fail("Unable to load sticky note.");
+        }
+    }
+
+    public async Task<Response<ChatStickyNoteDTO>> SaveStickyNoteAsync(
+        string tenantId, Guid sessionId, SaveChatStickyNoteDTO dto, Guid? updatedBy)
+    {
+        try
+        {
+            var entity = new ChatStickyNoteEntity
+            {
+                TenantId = tenantId,
+                SessionId = sessionId,
+                AgentName = dto.AgentName?.Trim() ?? string.Empty,
+                ReasonForContact = dto.ReasonForContact?.Trim() ?? string.Empty,
+                KeyActionsJson = System.Text.Json.JsonSerializer.Serialize(dto.KeyActionsTaken ?? []),
+                ColorHex = NormalizeColorHex(dto.ColorHex),
+                Pinned = dto.Pinned,
+                UpdatedAt = DateTime.UtcNow,
+                UpdatedBy = updatedBy
+            };
+            var saved = await _store.UpsertChatStickyNoteAsync(entity);
+            return Response<ChatStickyNoteDTO>.SuccessResponse(ToStickyNoteDto(saved), "Sticky note saved");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "SaveStickyNote failed for {SessionId}", sessionId);
+            var message = ex is InvalidOperationException ioe && !string.IsNullOrWhiteSpace(ioe.Message)
+                ? ioe.Message
+                : "Unable to save sticky note.";
+            return Response<ChatStickyNoteDTO>.Fail(message);
+        }
+    }
+
+    public async Task<Response<bool>> DeleteStickyNoteAsync(string tenantId, Guid sessionId)
+    {
+        try
+        {
+            await _store.DeleteChatStickyNoteAsync(tenantId, sessionId);
+            return Response<bool>.SuccessResponse(true, "Sticky note deleted");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "DeleteStickyNote failed for {SessionId}", sessionId);
+            return Response<bool>.Fail("Unable to delete sticky note.");
+        }
+    }
+
+    private static ChatStickyNoteDTO ToStickyNoteDto(ChatStickyNoteEntity e)
+    {
+        List<string> actions;
+        try
+        {
+            actions = System.Text.Json.JsonSerializer.Deserialize<List<string>>(e.KeyActionsJson) ?? [];
+        }
+        catch
+        {
+            actions = [];
+        }
+
+        return new ChatStickyNoteDTO
+        {
+            SessionId = e.SessionId,
+            AgentName = e.AgentName,
+            ReasonForContact = e.ReasonForContact,
+            KeyActionsTaken = actions,
+            ColorHex = e.ColorHex,
+            Pinned = e.Pinned,
+            UpdatedAt = e.UpdatedAt
+        };
+    }
+
+    private static string NormalizeColorHex(string? hex)
+    {
+        if (string.IsNullOrWhiteSpace(hex))
+            return "#fef08a";
+        var h = hex.Trim();
+        if (!h.StartsWith('#'))
+            h = "#" + h;
+        return h.Length is 7 or 9 ? h : "#fef08a";
     }
 
     private static bool CanAccessSession(ChatSessionEntity session, Guid? userId)

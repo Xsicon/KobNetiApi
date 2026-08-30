@@ -70,10 +70,30 @@ public class BridgingHelpService : IHelpService
                 tenantId, $"api/Help/admin/tickets/{ticketId}/assign-me", HttpMethod.Post)
             : _local.AssignTicketToMeAsync(tenantId, ticketId, userId, userName);
 
-    public Task<Response<SupportTicketDTO>> CreateTicketFromChatAsync(
-        string tenantId, Guid sessionId, string? category, string? subject) =>
-        // Always ops-owned ticket; session must exist in local store (W2.10 migrates bridged chat).
-        _local.CreateTicketFromChatAsync(tenantId, sessionId, category, subject);
+    public async Task<Response<SupportTicketDTO>> CreateTicketFromChatAsync(
+        string tenantId, Guid sessionId, string? category, string? subject)
+    {
+        if (!UseUpstream(tenantId))
+            return await _local.CreateTicketFromChatAsync(tenantId, sessionId, category, subject);
+
+        // Chat session lives in the product API; tickets remain ops-owned in KobNeti store.
+        var sessionRes = await _upstream.ForwardAsync<ChatSessionDTO>(
+            tenantId, $"api/Chat/session/{sessionId}", HttpMethod.Get, mintAdminToken: true);
+        if (!sessionRes.Success || sessionRes.Data is null)
+        {
+            return Response<SupportTicketDTO>.Fail(
+                string.IsNullOrWhiteSpace(sessionRes.Message) ? "Chat session not found" : sessionRes.Message);
+        }
+
+        var messagesRes = await _upstream.ForwardAsync<List<ChatMessageDTO>>(
+            tenantId, $"api/Chat/messages/{sessionId}", HttpMethod.Get, mintAdminToken: true);
+        var messages = messagesRes.Success && messagesRes.Data is not null
+            ? messagesRes.Data
+            : new List<ChatMessageDTO>();
+
+        return await _local.CreateTicketFromChatAsync(
+            tenantId, sessionId, sessionRes.Data, messages, category, subject);
+    }
 
     public Task<Response<List<HelpArticleDTO>>> SuggestArticlesForTicketAsync(
         string tenantId, Guid ticketId, int limit = 5) =>

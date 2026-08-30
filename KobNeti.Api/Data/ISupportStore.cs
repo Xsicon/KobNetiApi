@@ -13,6 +13,9 @@ public interface ISupportStore
     Task<ChatMessageEntity> InsertMessageAsync(ChatMessageEntity message);
     Task<List<ChatMessageEntity>> ListMessagesAsync(string tenantId, Guid sessionId);
     Task<List<ChatMessageEntity>> ListMessagesForSessionsAsync(string tenantId, IEnumerable<Guid> sessionIds);
+    Task<ChatStickyNoteEntity?> GetChatStickyNoteAsync(string tenantId, Guid sessionId);
+    Task<ChatStickyNoteEntity> UpsertChatStickyNoteAsync(ChatStickyNoteEntity note);
+    Task DeleteChatStickyNoteAsync(string tenantId, Guid sessionId);
 
     // Tickets
     Task<TicketEntity> InsertTicketAsync(TicketEntity ticket);

@@ -10,6 +10,7 @@ public class IncidentDTO
     public string? CommanderName { get; set; }
     public Guid? CommanderUserId { get; set; }
     public Guid? SourceTicketId { get; set; }
+    public Guid? SourceChatSessionId { get; set; }
     public string? PostmortemNotes { get; set; }
     public DateTime? CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
@@ -32,6 +33,19 @@ public class CreateIncidentDTO
     public string Severity { get; set; } = IncidentSeverity.Sev3;
     public string? CommanderName { get; set; }
     public Guid? SourceTicketId { get; set; }
+    public Guid? SourceChatSessionId { get; set; }
+}
+
+public class EscalateFromChatDTO
+{
+    /// <summary>engineering | support_manager | agent</summary>
+    public string Target { get; set; } = "engineering";
+    /// <summary>UI severity label: Low, Medium, High, Urgent</summary>
+    public string Severity { get; set; } = "High";
+    public string Reason { get; set; } = string.Empty;
+    public Guid? AssigneeUserId { get; set; }
+    public string? AssigneeName { get; set; }
+    public string? Title { get; set; }
 }
 
 public class EscalateTicketDTO

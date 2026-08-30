@@ -26,6 +26,19 @@ public class ChatMessageEntity
     public DateTime CreatedAt { get; set; }
 }
 
+public class ChatStickyNoteEntity
+{
+    public string TenantId { get; set; } = string.Empty;
+    public Guid SessionId { get; set; }
+    public string AgentName { get; set; } = string.Empty;
+    public string ReasonForContact { get; set; } = string.Empty;
+    public string KeyActionsJson { get; set; } = "[]";
+    public string ColorHex { get; set; } = "#F29D68";
+    public bool Pinned { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    public Guid? UpdatedBy { get; set; }
+}
+
 public class TicketEntity
 {
     public Guid Id { get; set; }
@@ -158,6 +171,7 @@ public class IncidentEntity
     public string? CommanderName { get; set; }
     public Guid? CommanderUserId { get; set; }
     public Guid? SourceTicketId { get; set; }
+    public Guid? SourceChatSessionId { get; set; }
     public string? PostmortemNotes { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

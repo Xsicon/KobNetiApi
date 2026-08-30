@@ -16,12 +16,18 @@ public class ProductsController : ApiControllerBase
 {
     private readonly IProductRegistry _registry;
     private readonly ITenantResolver _tenants;
+    private readonly UpstreamApiClient _upstream;
     private readonly IConfiguration _config;
 
-    public ProductsController(IProductRegistry registry, ITenantResolver tenants, IConfiguration config)
+    public ProductsController(
+        IProductRegistry registry,
+        ITenantResolver tenants,
+        UpstreamApiClient upstream,
+        IConfiguration config)
     {
         _registry = registry;
         _tenants = tenants;
+        _upstream = upstream;
         _config = config;
     }
 
@@ -96,6 +102,50 @@ public class ProductsController : ApiControllerBase
         return Ok(Response<ProductDTO>.SuccessResponse(ToDto(updated), "GitHub repo updated"));
     }
 
+    [HttpPatch("{slug}/upstream-api")]
+    public async Task<ActionResult<Response<ProductDTO>>> UpdateUpstreamApi(
+        string slug, [FromBody] UpdateProductUpstreamApiDTO request, CancellationToken ct)
+    {
+        if (!AdminRoleClaims.CanAccessProduct(User, slug))
+            return StatusCode(403, Response<ProductDTO>.Fail($"No access to product '{slug}'."));
+
+        var url = request.UpstreamApiBaseUrl?.Trim();
+        if (!string.IsNullOrWhiteSpace(url))
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+                return BadRequest(Response<ProductDTO>.Fail("Enter a valid absolute URL (e.g. http://localhost:5243/)."));
+
+            if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+                return BadRequest(Response<ProductDTO>.Fail("Product API URL must use http or https."));
+        }
+
+        var updated = await _registry.UpdateUpstreamApiBaseUrlAsync(slug, url, ct);
+        if (updated is null)
+            return NotFound(Response<ProductDTO>.Fail("Product not found"));
+
+        if (_tenants is ProductTenantResolver resolver)
+            resolver.InvalidateCache();
+
+        return Ok(Response<ProductDTO>.SuccessResponse(ToDto(updated), "Product API URL saved"));
+    }
+
+    [HttpGet("{slug}/upstream-status")]
+    public async Task<ActionResult<Response<ProductUpstreamStatusDTO>>> UpstreamStatus(string slug, CancellationToken ct)
+    {
+        if (!AdminRoleClaims.CanAccessProduct(User, slug))
+            return StatusCode(403, Response<ProductUpstreamStatusDTO>.Fail($"No access to product '{slug}'."));
+
+        var product = await _registry.GetBySlugAsync(slug, ct);
+        if (product is null)
+            return NotFound(Response<ProductUpstreamStatusDTO>.Fail("Product not found"));
+
+        var status = await _upstream.ProbeAsync(slug);
+        if (string.IsNullOrWhiteSpace(status.UpstreamApiBaseUrl))
+            status.UpstreamApiBaseUrl = product.UpstreamApiBaseUrl;
+
+        return Ok(Response<ProductUpstreamStatusDTO>.SuccessResponse(status, "Status loaded"));
+    }
+
     private static ProductDTO ToDto(ProductRecord p) => new()
     {
         Id = p.Id,
@@ -106,6 +156,7 @@ public class ProductsController : ApiControllerBase
         SupportTier = p.SupportTier,
         PublicKey = p.PublicKey,
         PublicHelpCenterUrl = p.PublicHelpCenterUrl ?? "",
+        UpstreamApiBaseUrl = p.UpstreamApiBaseUrl,
         GithubRepoUrl = p.GithubRepoUrl,
         Enabled = p.Enabled
     };

@@ -32,3 +32,23 @@ public class ChatSessionDTO
     public int UnreadMessageCount { get; set; }
     public DateTime CreatedAt { get; set; }
 }
+
+public class ChatStickyNoteDTO
+{
+    public Guid SessionId { get; set; }
+    public string AgentName { get; set; } = string.Empty;
+    public string ReasonForContact { get; set; } = string.Empty;
+    public List<string> KeyActionsTaken { get; set; } = [];
+    public string ColorHex { get; set; } = "#F29D68";
+    public bool Pinned { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+public class SaveChatStickyNoteDTO
+{
+    public string? AgentName { get; set; }
+    public string? ReasonForContact { get; set; }
+    public List<string>? KeyActionsTaken { get; set; }
+    public string? ColorHex { get; set; }
+    public bool Pinned { get; set; }
+}

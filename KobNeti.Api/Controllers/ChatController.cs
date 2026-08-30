@@ -106,4 +106,32 @@ public class ChatController : ApiControllerBase
             request?.Subject);
         return HandleResponse(result);
     }
+
+    [HttpGet("session/{sessionId:guid}/sticky-note")]
+    [Authorize(Policy = AdminAuthorizationPolicies.AdminSupport)]
+    public async Task<ActionResult<Response<ChatStickyNoteDTO?>>> GetStickyNote(Guid sessionId)
+    {
+        var result = await _chatService.GetStickyNoteAsync(RequireTenantId(_tenant), sessionId);
+        return HandleResponse(result);
+    }
+
+    [HttpPut("session/{sessionId:guid}/sticky-note")]
+    [Authorize(Policy = AdminAuthorizationPolicies.AdminSupport)]
+    public async Task<ActionResult<Response<ChatStickyNoteDTO>>> SaveStickyNote(
+        Guid sessionId,
+        [FromBody] SaveChatStickyNoteDTO request)
+    {
+        var updatedBy = AdminRoleClaims.GetUserId(User);
+        var result = await _chatService.SaveStickyNoteAsync(
+            RequireTenantId(_tenant), sessionId, request, updatedBy);
+        return HandleResponse(result);
+    }
+
+    [HttpDelete("session/{sessionId:guid}/sticky-note")]
+    [Authorize(Policy = AdminAuthorizationPolicies.AdminSupport)]
+    public async Task<ActionResult<Response<bool>>> DeleteStickyNote(Guid sessionId)
+    {
+        var result = await _chatService.DeleteStickyNoteAsync(RequireTenantId(_tenant), sessionId);
+        return HandleResponse(result);
+    }
 }
