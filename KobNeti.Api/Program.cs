@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using KobNeti.Api.Auth;
 using KobNeti.Api.Data;
+using KobNeti.Api.Email;
 using KobNeti.Api.Products;
 using KobNeti.Api.Services;
 using KobNeti.Api.Staff;
@@ -78,6 +79,11 @@ builder.Services.AddScoped<IReportService, ReportService>();
 builder.Services.AddScoped<IPlatformHelpService, PlatformHelpService>();
 builder.Services.AddScoped<IInternalChatService, InternalChatService>();
 builder.Services.AddScoped<IAssetService, AssetService>();
+
+builder.Services.Configure<PostmarkOptions>(builder.Configuration.GetSection(PostmarkOptions.SectionName));
+builder.Services.AddHttpClient<IEmailSender, PostmarkEmailSender>();
+builder.Services.AddHttpClient("supabase-admin");
+builder.Services.AddScoped<IPasswordResetService, PasswordResetService>();
 
 builder.Services
     .AddAuthentication(TenantJwtAuthenticationHandler.SchemeName)

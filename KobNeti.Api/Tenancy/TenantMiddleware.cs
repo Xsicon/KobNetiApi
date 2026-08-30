@@ -7,6 +7,7 @@ public class TenantMiddleware
     private static readonly PathString[] SkipPrefixes =
     [
         new("/api/SupportAuth/exchange"),
+        new("/api/Auth/forgot-password"),
         new("/swagger"),
         new("/health")
     ];

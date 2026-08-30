@@ -48,6 +48,16 @@ Agent JWT claims: `sub`, `email`, `app_role` ∈ `admin` \| `manager` \| `suppor
 
 Ops UI exchanges a Supabase access token via `POST /api/SupportAuth/exchange`.
 
+### Password reset (Postmark)
+
+1. Set `Postmark:ServerToken` and verified `Postmark:FromEmail`.
+2. Set `Supabase:ServiceRoleKey` (needed for `auth/v1/admin/generate_link` recovery links).
+3. Set `Auth:PasswordResetRedirectUrl` to the Blazor route (e.g. `https://your-app/admin/reset-password`).
+4. Login UI calls `POST /api/Auth/forgot-password` `{ email, redirectTo }` — no tenant header.
+5. User opens the email link and sets a new password on `/admin/reset-password`.
+
+Dry-run without delivery: use `POSTMARK_API_TEST` as the server token.
+
 Staff source of truth: `sominnercore.staff_profiles` + `staff_product_access` (SQL: `supabase/staff_access.sql`), with optional `Support:Staff` config fallback. Platform admins: `app_metadata.role=admin` or `Support:CoreAdminEmails`.
 
 Dev tenant key for muuqwear: `pk_muuqwear_dev_public` (see `appsettings.json`).
