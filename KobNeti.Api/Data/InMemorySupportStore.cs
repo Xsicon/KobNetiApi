@@ -479,16 +479,16 @@ public class InMemorySupportStore : ISupportStore
 
     public Task UpsertGithubCacheAsync(GithubCacheEntity cache)
     {
-        var key = $"{cache.TenantId}:{cache.CacheKind}";
+        var key = $"{cache.TenantId}:{cache.RepoKey}:{cache.CacheKind}";
         if (_githubCache.TryGetValue(key, out var existing))
             cache.Id = existing.Id;
         _githubCache[key] = Clone(cache);
         return Task.CompletedTask;
     }
 
-    public Task<GithubCacheEntity?> GetGithubCacheAsync(string tenantId, string cacheKind)
+    public Task<GithubCacheEntity?> GetGithubCacheAsync(string tenantId, string repoKey, string cacheKind)
     {
-        _githubCache.TryGetValue($"{tenantId}:{cacheKind}", out var c);
+        _githubCache.TryGetValue($"{tenantId}:{repoKey}:{cacheKind}", out var c);
         return Task.FromResult(c is null ? null : Clone(c));
     }
 
@@ -765,21 +765,22 @@ public class InMemorySupportStore : ISupportStore
     {
         if (!_platformHelp.IsEmpty) return;
         var now = DateTime.UtcNow;
-        void Add(string slug, string title, string body, string cat, int order)
+        foreach (var seed in PlatformHelpSeed.All)
         {
             var id = Guid.NewGuid();
             _platformHelp[id] = new PlatformHelpArticleEntity
             {
-                Id = id, Slug = slug, Title = title, Body = body, Category = cat,
-                Status = "published", SortOrder = order, CreatedAt = now, UpdatedAt = now
+                Id = id,
+                Slug = seed.Slug,
+                Title = seed.Title,
+                Body = seed.Body,
+                Category = seed.Category,
+                Status = "published",
+                SortOrder = seed.SortOrder,
+                CreatedAt = now,
+                UpdatedAt = now
             };
         }
-        Add("getting-started", "Getting started with KobNeti",
-            "Use the product switcher to pick a brand, then open Support, Engineering, or People Ops.", "general", 1);
-        Add("support-hub", "Support Hub",
-            "Live chat, tickets, incidents, and product KB live under Support Hub.", "support", 2);
-        Add("time-payroll", "Time & payroll",
-            "Clock in/out under Time & Approvals. Payroll runs use approved time only.", "people", 3);
     }
 
     public Task InsertReportRunAsync(ReportRunEntity run)

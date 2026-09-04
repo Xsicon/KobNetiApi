@@ -1,3 +1,5 @@
+using KobNeti.Api.Products;
+
 namespace KobNeti.Api.DTOs;
 
 public class SupportTicketDTO
@@ -274,7 +276,22 @@ public class ProductDTO
     public string PublicHelpCenterUrl { get; set; } = string.Empty;
     public string? UpstreamApiBaseUrl { get; set; }
     public string? GithubRepoUrl { get; set; }
+    public List<ProductRepoDTO> LinkedRepos { get; set; } = [];
     public bool Enabled { get; set; }
+}
+
+public class ProductRepoDTO
+{
+    public Guid Id { get; set; }
+    public string RepoKind { get; set; } = ProductRepoKinds.WebApp;
+    public string Title { get; set; } = string.Empty;
+    public string GithubRepoUrl { get; set; } = string.Empty;
+}
+
+public class UpsertProductRepoDTO
+{
+    public string Title { get; set; } = string.Empty;
+    public string GithubRepoUrl { get; set; } = string.Empty;
 }
 
 public class UpdateProductUpstreamApiDTO

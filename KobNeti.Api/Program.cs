@@ -6,6 +6,7 @@ using KobNeti.Api.Email;
 using KobNeti.Api.Products;
 using KobNeti.Api.Services;
 using KobNeti.Api.Staff;
+using KobNeti.Api.Storage;
 using KobNeti.Api.Teams;
 using KobNeti.Api.Tenancy;
 using Supabase;
@@ -15,6 +16,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.Configure<SupportOptions>(builder.Configuration.GetSection(SupportOptions.SectionName));
 builder.Services.AddSingleton<ITenantContextAccessor, TenantContextAccessor>();
 builder.Services.AddSingleton<InMemoryProductRegistry>();
+builder.Services.AddSingleton<InMemoryProductRepoRegistry>();
 builder.Services.AddSingleton<InMemoryStaffDirectory>();
 builder.Services.AddSingleton<InMemoryTeamDirectory>();
 builder.Services.AddHttpClient();
@@ -27,6 +29,7 @@ if (useInMemory)
 {
     builder.Services.AddSingleton<ISupportStore, InMemorySupportStore>();
     builder.Services.AddSingleton<IProductRegistry>(sp => sp.GetRequiredService<InMemoryProductRegistry>());
+    builder.Services.AddSingleton<IProductRepoRegistry>(sp => sp.GetRequiredService<InMemoryProductRepoRegistry>());
     builder.Services.AddSingleton<IStaffDirectory>(sp => sp.GetRequiredService<InMemoryStaffDirectory>());
     builder.Services.AddSingleton<ITeamDirectory>(sp => sp.GetRequiredService<InMemoryTeamDirectory>());
 }
@@ -48,6 +51,7 @@ else
     });
     builder.Services.AddSingleton<ISupportStore, SupabaseSupportStore>();
     builder.Services.AddSingleton<IProductRegistry, SupabaseProductRegistry>();
+    builder.Services.AddSingleton<IProductRepoRegistry, SupabaseProductRepoRegistry>();
     builder.Services.AddSingleton<IStaffDirectory, SupabaseStaffDirectory>();
     builder.Services.AddSingleton<ITeamDirectory, SupabaseTeamDirectory>();
 }
@@ -73,6 +77,7 @@ builder.Services.AddScoped<IMilestoneService, MilestoneService>();
 builder.Services.AddHttpClient("github-readonly");
 builder.Services.AddScoped<IGithubReadService, GithubReadService>();
 builder.Services.AddScoped<ICalendarOpsService, CalendarOpsService>();
+builder.Services.AddScoped<ISupabaseStorageUploader, SupabaseStorageUploader>();
 builder.Services.AddScoped<IOpsFileService, OpsFileService>();
 builder.Services.AddScoped<IIntegrationService, IntegrationService>();
 builder.Services.AddScoped<ITimeTrackingService, TimeTrackingService>();

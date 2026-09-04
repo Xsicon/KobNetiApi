@@ -1,3 +1,5 @@
+using KobNeti.Api.Products;
+
 namespace KobNeti.Api.Data;
 
 public class ChatSessionEntity
@@ -243,6 +245,7 @@ public class GithubCacheEntity
 {
     public Guid Id { get; set; }
     public string TenantId { get; set; } = string.Empty;
+    public string RepoKey { get; set; } = ProductRepoKinds.WebApp;
     public string RepoUrl { get; set; } = string.Empty;
     public string CacheKind { get; set; } = string.Empty;
     public string PayloadJson { get; set; } = "[]";

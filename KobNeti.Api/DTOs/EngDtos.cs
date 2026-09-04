@@ -101,11 +101,14 @@ public class CalendarEventDTO
 
 public class GithubCacheDTO
 {
+    public string? RepoKey { get; set; }
+    public string? RepoTitle { get; set; }
     public string? RepoUrl { get; set; }
     public DateTime? PullsFetchedAt { get; set; }
     public DateTime? CommitsFetchedAt { get; set; }
     public List<GithubPullDTO> Pulls { get; set; } = [];
     public List<GithubCommitDTO> Commits { get; set; } = [];
+    public List<ProductRepoDTO> LinkedRepos { get; set; } = [];
     public string? Message { get; set; }
 }
 

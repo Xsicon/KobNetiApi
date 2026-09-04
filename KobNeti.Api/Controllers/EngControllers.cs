@@ -94,10 +94,16 @@ public class GithubController : ApiControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<Response<GithubCacheDTO>>> Get() =>
-        HandleResponse(await _github.GetCachedAsync(RequireTenantId(_tenant)));
+    public async Task<ActionResult<Response<GithubCacheDTO>>> Get([FromQuery] string? repoKey = null) =>
+        HandleResponse(await _github.GetCachedAsync(RequireTenantId(_tenant), repoKey));
+
+    [HttpGet("repos")]
+    public async Task<ActionResult<Response<List<ProductRepoDTO>>>> ListRepos() =>
+        HandleResponse(await _github.ListReposAsync(RequireTenantId(_tenant)));
 
     [HttpPost("refresh")]
-    public async Task<ActionResult<Response<GithubCacheDTO>>> Refresh(CancellationToken ct) =>
-        HandleResponse(await _github.RefreshAsync(RequireTenantId(_tenant), ct));
+    public async Task<ActionResult<Response<GithubCacheDTO>>> Refresh(
+        [FromQuery] string? repoKey = null,
+        CancellationToken ct = default) =>
+        HandleResponse(await _github.RefreshAsync(RequireTenantId(_tenant), repoKey, ct));
 }

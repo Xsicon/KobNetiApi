@@ -21,6 +21,7 @@ public class EngTaskService : IEngTaskService
     public async Task<Response<List<EngTaskDTO>>> ListAsync(
         string tenantId, string? status, Guid? milestoneId, int page, int pageSize)
     {
+        await EngineeringSampleData.EnsureSeededAsync(_store, tenantId);
         var (items, _) = await _store.ListEngTasksAsync(tenantId, status, milestoneId, page, pageSize);
         return Response<List<EngTaskDTO>>.SuccessResponse(items.Select(Map).ToList(), "Tasks loaded");
     }

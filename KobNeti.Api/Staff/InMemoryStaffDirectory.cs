@@ -33,6 +33,29 @@ public class InMemoryStaffDirectory : IStaffDirectory
                 ProductSlugs = NormalizeSlugs(s.ProductSlugs)
             });
         }
+
+        if (_staff.Count == 0)
+            SeedDemoTeam();
+    }
+
+    private void SeedDemoTeam()
+    {
+        void Add(string email, string name, params string[] products) =>
+            _staff.Add(new StaffAccessRecord
+            {
+                Id = Guid.NewGuid(),
+                Email = email,
+                DisplayName = name,
+                Role = StaffRoles.Support,
+                Active = true,
+                ProductSlugs = NormalizeSlugs(products)
+            });
+
+        Add("adeel@kobneti.com", "Adeel D.", "muuqwear", "salguri", "gaarx");
+        Add("ibrahim@kobneti.com", "Ibrahim M.", "muuqwear");
+        Add("sarah@kobneti.com", "Sarah K.", "muuqwear", "salguri");
+        Add("leila@kobneti.com", "Leila H.", "muuqwear", "gaarx");
+        Add("mike@kobneti.com", "Mike C.", "salguri", "gaarx");
     }
 
     public Task<StaffAccessRecord?> FindByEmailAsync(string email, CancellationToken ct = default)

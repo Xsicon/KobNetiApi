@@ -1,3 +1,5 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using KobNeti.Api.Auth;
@@ -10,21 +12,103 @@ using KobNeti.Api.Tenancy;
 namespace KobNeti.Api.Controllers;
 
 [Route("api/Staff")]
-[Authorize(Policy = AdminAuthorizationPolicies.PlatformAdmin)]
 public class StaffController : ApiControllerBase
 {
     private readonly IStaffDirectory _staff;
+    private readonly InMemoryStaffDirectory _demoStaff;
     private readonly IAuditService _audit;
     private readonly ITenantContextAccessor _tenant;
 
-    public StaffController(IStaffDirectory staff, IAuditService audit, ITenantContextAccessor tenant)
+    public StaffController(
+        IStaffDirectory staff,
+        InMemoryStaffDirectory demoStaff,
+        IAuditService audit,
+        ITenantContextAccessor tenant)
     {
         _staff = staff;
+        _demoStaff = demoStaff;
         _audit = audit;
         _tenant = tenant;
     }
 
+    /// <summary>Staff picker for support agents (assign tasks, escalate chat, etc.).</summary>
+    [HttpGet("assignable")]
+    [Authorize(Policy = AdminAuthorizationPolicies.AdminSupport)]
+    public async Task<ActionResult<Response<List<StaffMemberDTO>>>> ListAssignable(CancellationToken ct)
+    {
+        var tenantId = _tenant.Current?.TenantId;
+        var list = await _staff.ListAsync(ct);
+        var filtered = FilterAssignable(list, tenantId);
+
+        if (filtered.Count == 0 && list.Count > 0)
+            filtered = ToActiveDtoList(list);
+
+        if (filtered.Count == 0)
+        {
+            var demo = await _demoStaff.ListAsync(ct);
+            filtered = FilterAssignable(demo, tenantId);
+            if (filtered.Count == 0 && demo.Count > 0)
+                filtered = ToActiveDtoList(demo);
+        }
+
+        EnsureCurrentUserIncluded(filtered);
+        return Ok(Response<List<StaffMemberDTO>>.SuccessResponse(filtered, "Assignable staff loaded"));
+    }
+
+    private void EnsureCurrentUserIncluded(List<StaffMemberDTO> list)
+    {
+        var email = User.FindFirstValue(ClaimTypes.Email)
+                    ?? User.FindFirstValue(JwtRegisteredClaimNames.Email);
+        if (string.IsNullOrWhiteSpace(email))
+            return;
+
+        if (list.Any(s => string.Equals(s.Email, email, StringComparison.OrdinalIgnoreCase)))
+            return;
+
+        var displayName = AdminRoleClaims.GetDisplayName(User);
+        if (displayName.Contains('@', StringComparison.Ordinal))
+        {
+            var at = displayName.IndexOf('@');
+            displayName = at > 0 ? displayName[..at] : displayName;
+        }
+
+        list.Add(new StaffMemberDTO
+        {
+            Id = AdminRoleClaims.GetUserId(User) ?? Guid.NewGuid(),
+            Email = email,
+            DisplayName = displayName,
+            Role = User.FindFirstValue(AdminRoleClaims.RoleClaimType) ?? StaffRoles.Support,
+            Active = true,
+            ProductSlugs = AdminRoleClaims.GetProductSlugs(User)
+                .Where(p => !string.Equals(p, AdminRoleClaims.AllProducts, StringComparison.Ordinal))
+                .ToList()
+        });
+
+        list.Sort((a, b) => string.Compare(
+            a.DisplayName ?? a.Email,
+            b.DisplayName ?? b.Email,
+            StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static List<StaffMemberDTO> ToActiveDtoList(IReadOnlyList<StaffAccessRecord> list) =>
+        list
+            .Where(s => s.Active)
+            .Select(ToDto)
+            .OrderBy(s => s.DisplayName ?? s.Email, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private static List<StaffMemberDTO> FilterAssignable(IReadOnlyList<StaffAccessRecord> list, string? tenantId) =>
+        list
+            .Where(s => s.Active)
+            .Where(s => string.IsNullOrWhiteSpace(tenantId)
+                        || s.ProductSlugs.Count == 0
+                        || s.ProductSlugs.Any(p => string.Equals(p, tenantId, StringComparison.OrdinalIgnoreCase)))
+            .Select(ToDto)
+            .OrderBy(s => s.DisplayName ?? s.Email, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
     [HttpGet]
+    [Authorize(Policy = AdminAuthorizationPolicies.PlatformAdmin)]
     public async Task<ActionResult<Response<List<StaffMemberDTO>>>> List(CancellationToken ct)
     {
         var list = await _staff.ListAsync(ct);
@@ -34,6 +118,7 @@ public class StaffController : ApiControllerBase
     }
 
     [HttpPost("invite")]
+    [Authorize(Policy = AdminAuthorizationPolicies.PlatformAdmin)]
     public async Task<ActionResult<Response<StaffMemberDTO>>> Invite([FromBody] InviteStaffDTO dto, CancellationToken ct)
     {
         try
@@ -58,6 +143,7 @@ public class StaffController : ApiControllerBase
     }
 
     [HttpPost("{id:guid}/deactivate")]
+    [Authorize(Policy = AdminAuthorizationPolicies.PlatformAdmin)]
     public async Task<ActionResult<Response<StaffMemberDTO>>> Deactivate(Guid id, CancellationToken ct)
     {
         var updated = await _staff.SetActiveAsync(id, false, ct);
@@ -70,6 +156,7 @@ public class StaffController : ApiControllerBase
     }
 
     [HttpPost("{id:guid}/activate")]
+    [Authorize(Policy = AdminAuthorizationPolicies.PlatformAdmin)]
     public async Task<ActionResult<Response<StaffMemberDTO>>> Activate(Guid id, CancellationToken ct)
     {
         var updated = await _staff.SetActiveAsync(id, true, ct);
@@ -82,6 +169,7 @@ public class StaffController : ApiControllerBase
     }
 
     [HttpPut("{id:guid}/products")]
+    [Authorize(Policy = AdminAuthorizationPolicies.PlatformAdmin)]
     public async Task<ActionResult<Response<StaffMemberDTO>>> SetProducts(
         Guid id,
         [FromBody] UpdateStaffProductsDTO dto,

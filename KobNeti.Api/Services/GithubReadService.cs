@@ -10,11 +10,13 @@ namespace KobNeti.Api.Services;
 
 /// <summary>
 /// W4.9–W4.10: read-only GitHub fetches into cache. Never POSTs/PATCHes/DELETEs to GitHub.
+/// Products can link multiple repos (web app + API) per tenant.
 /// </summary>
 public interface IGithubReadService
 {
-    Task<Response<GithubCacheDTO>> GetCachedAsync(string tenantId);
-    Task<Response<GithubCacheDTO>> RefreshAsync(string tenantId, CancellationToken ct = default);
+    Task<Response<List<ProductRepoDTO>>> ListReposAsync(string tenantId);
+    Task<Response<GithubCacheDTO>> GetCachedAsync(string tenantId, string? repoKey = null);
+    Task<Response<GithubCacheDTO>> RefreshAsync(string tenantId, string? repoKey = null, CancellationToken ct = default);
 }
 
 public class GithubReadService : IGithubReadService
@@ -25,47 +27,96 @@ public class GithubReadService : IGithubReadService
 
     private readonly ISupportStore _store;
     private readonly IProductRegistry _products;
+    private readonly IProductRepoRegistry _repos;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<GithubReadService> _logger;
 
     public GithubReadService(
         ISupportStore store,
         IProductRegistry products,
+        IProductRepoRegistry repos,
         IHttpClientFactory httpClientFactory,
         ILogger<GithubReadService> logger)
     {
         _store = store;
         _products = products;
+        _repos = repos;
         _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
-    public async Task<Response<GithubCacheDTO>> GetCachedAsync(string tenantId)
+    public async Task<Response<List<ProductRepoDTO>>> ListReposAsync(string tenantId)
     {
-        var product = await _products.GetBySlugAsync(tenantId);
-        var pullsCache = await _store.GetGithubCacheAsync(tenantId, "pulls");
-        var commitsCache = await _store.GetGithubCacheAsync(tenantId, "commits");
-        return Response<GithubCacheDTO>.SuccessResponse(BuildDto(product?.GithubRepoUrl, pullsCache, commitsCache), "GitHub cache");
+        var resolved = await ResolveReposAsync(tenantId);
+        return Response<List<ProductRepoDTO>>.SuccessResponse(
+            resolved.Select(ToRepoDto).ToList(),
+            "Linked repos loaded");
     }
 
-    public async Task<Response<GithubCacheDTO>> RefreshAsync(string tenantId, CancellationToken ct = default)
+    public async Task<Response<GithubCacheDTO>> GetCachedAsync(string tenantId, string? repoKey = null)
     {
-        var product = await _products.GetBySlugAsync(tenantId);
-        if (product is null)
-            return Response<GithubCacheDTO>.Fail("Product not found");
-        if (string.IsNullOrWhiteSpace(product.GithubRepoUrl))
-            return Response<GithubCacheDTO>.Fail("Set github_repo_url on the product first");
+        await EngineeringSampleData.EnsureSeededAsync(_store, tenantId);
+        var resolved = await ResolveReposAsync(tenantId);
+        if (resolved.Count == 0)
+            return Response<GithubCacheDTO>.SuccessResponse(new GithubCacheDTO(), "No linked repos");
 
-        if (!TryParseRepo(product.GithubRepoUrl, out var owner, out var repo))
-            return Response<GithubCacheDTO>.Fail("Invalid GitHub repo URL (expected https://github.com/owner/repo)");
+        var target = PickRepo(resolved, repoKey);
+        var pullsCache = await _store.GetGithubCacheAsync(tenantId, target.RepoKind, "pulls");
+        var commitsCache = await _store.GetGithubCacheAsync(tenantId, target.RepoKind, "commits");
+        var dto = BuildDto(target, pullsCache, commitsCache);
+        dto.LinkedRepos = resolved.Select(ToRepoDto).ToList();
+        return Response<GithubCacheDTO>.SuccessResponse(dto, "GitHub cache");
+    }
+
+    public async Task<Response<GithubCacheDTO>> RefreshAsync(string tenantId, string? repoKey = null, CancellationToken ct = default)
+    {
+        var resolved = await ResolveReposAsync(tenantId);
+        if (resolved.Count == 0)
+            return Response<GithubCacheDTO>.Fail("Link at least one GitHub repo for this product (web app and/or API).");
+
+        if (string.IsNullOrWhiteSpace(repoKey))
+        {
+            GithubCacheDTO? last = null;
+            foreach (var repo in resolved)
+            {
+                var result = await RefreshOneAsync(tenantId, repo, ct);
+                if (!result.Success)
+                    return result;
+                last = result.Data;
+            }
+
+            last ??= new GithubCacheDTO();
+            last.LinkedRepos = resolved.Select(ToRepoDto).ToList();
+            last.Message = $"Refreshed {resolved.Count} linked repo(s) from GitHub (read-only)";
+            return Response<GithubCacheDTO>.SuccessResponse(last, "GitHub cache refreshed");
+        }
+
+        var hit = PickRepo(resolved, repoKey);
+        var single = await RefreshOneAsync(tenantId, hit, ct);
+        if (single.Success && single.Data is not null)
+        {
+            single.Data.LinkedRepos = resolved.Select(ToRepoDto).ToList();
+        }
+        return single;
+    }
+
+    private async Task<Response<GithubCacheDTO>> RefreshOneAsync(
+        string tenantId,
+        ProductRepoRecord repo,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(repo.GithubRepoUrl))
+            return Response<GithubCacheDTO>.Fail($"Set a GitHub URL for {repo.Title} first.");
+
+        if (!TryParseRepo(repo.GithubRepoUrl, out var owner, out var ghRepo))
+            return Response<GithubCacheDTO>.Fail($"Invalid GitHub URL for {repo.Title} (expected https://github.com/owner/repo)");
 
         var client = _httpClientFactory.CreateClient("github-readonly");
         client.DefaultRequestHeaders.UserAgent.ParseAdd("KobNetiOps/1.0");
         client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
 
-        // W4.10: GET only — never write to GitHub
-        var pullsUrl = $"https://api.github.com/repos/{owner}/{repo}/pulls?state=all&per_page=20";
-        var commitsUrl = $"https://api.github.com/repos/{owner}/{repo}/commits?per_page=20";
+        var pullsUrl = $"https://api.github.com/repos/{owner}/{ghRepo}/pulls?state=all&per_page=20";
+        var commitsUrl = $"https://api.github.com/repos/{owner}/{ghRepo}/commits?per_page=20";
 
         string pullsJson;
         string commitsJson;
@@ -76,7 +127,7 @@ public class GithubReadService : IGithubReadService
             if (!pullsRes.IsSuccessStatusCode)
             {
                 _logger.LogWarning("GitHub pulls GET failed {Status}: {Body}", (int)pullsRes.StatusCode, pullsJson);
-                return Response<GithubCacheDTO>.Fail($"GitHub pulls read failed ({(int)pullsRes.StatusCode})");
+                return Response<GithubCacheDTO>.Fail($"GitHub pulls read failed for {repo.Title} ({(int)pullsRes.StatusCode})");
             }
 
             using var commitsRes = await client.GetAsync(commitsUrl, ct);
@@ -84,13 +135,13 @@ public class GithubReadService : IGithubReadService
             if (!commitsRes.IsSuccessStatusCode)
             {
                 _logger.LogWarning("GitHub commits GET failed {Status}: {Body}", (int)commitsRes.StatusCode, commitsJson);
-                return Response<GithubCacheDTO>.Fail($"GitHub commits read failed ({(int)commitsRes.StatusCode})");
+                return Response<GithubCacheDTO>.Fail($"GitHub commits read failed for {repo.Title} ({(int)commitsRes.StatusCode})");
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "GitHub refresh failed for {Tenant}", tenantId);
-            return Response<GithubCacheDTO>.Fail("GitHub refresh failed");
+            _logger.LogWarning(ex, "GitHub refresh failed for {Tenant}/{RepoKind}", tenantId, repo.RepoKind);
+            return Response<GithubCacheDTO>.Fail($"GitHub refresh failed for {repo.Title}");
         }
 
         var now = DateTime.UtcNow;
@@ -98,7 +149,8 @@ public class GithubReadService : IGithubReadService
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            RepoUrl = product.GithubRepoUrl,
+            RepoKey = repo.RepoKind,
+            RepoUrl = repo.GithubRepoUrl,
             CacheKind = "pulls",
             PayloadJson = NormalizePullsJson(pullsJson),
             FetchedAt = now
@@ -107,7 +159,8 @@ public class GithubReadService : IGithubReadService
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            RepoUrl = product.GithubRepoUrl,
+            RepoKey = repo.RepoKind,
+            RepoUrl = repo.GithubRepoUrl,
             CacheKind = "commits",
             PayloadJson = NormalizeCommitsJson(commitsJson),
             FetchedAt = now
@@ -115,10 +168,53 @@ public class GithubReadService : IGithubReadService
         await _store.UpsertGithubCacheAsync(pullsCache);
         await _store.UpsertGithubCacheAsync(commitsCache);
 
-        var dto = BuildDto(product.GithubRepoUrl, pullsCache, commitsCache);
-        dto.Message = "Refreshed from GitHub (read-only)";
+        var dto = BuildDto(repo, pullsCache, commitsCache);
+        dto.Message = $"Refreshed {repo.Title} from GitHub (read-only)";
         return Response<GithubCacheDTO>.SuccessResponse(dto, "GitHub cache refreshed");
     }
+
+    private async Task<IReadOnlyList<ProductRepoRecord>> ResolveReposAsync(string tenantId)
+    {
+        var linked = await _repos.ListByProductSlugAsync(tenantId);
+        if (linked.Count > 0)
+            return linked;
+
+        var product = await _products.GetBySlugAsync(tenantId);
+        if (product is null || string.IsNullOrWhiteSpace(product.GithubRepoUrl))
+            return [];
+
+        return
+        [
+            new ProductRepoRecord
+            {
+                Id = Guid.Empty,
+                ProductSlug = tenantId,
+                RepoKind = ProductRepoKinds.WebApp,
+                Title = ProductRepoKinds.DefaultTitle(product.DisplayName, ProductRepoKinds.WebApp),
+                GithubRepoUrl = product.GithubRepoUrl,
+                UpdatedAt = product.UpdatedAt
+            }
+        ];
+    }
+
+    private static ProductRepoRecord PickRepo(IReadOnlyList<ProductRepoRecord> repos, string? repoKey)
+    {
+        if (!string.IsNullOrWhiteSpace(repoKey))
+        {
+            var normalized = ProductRepoKinds.Normalize(repoKey);
+            return repos.First(r => r.RepoKind.Equals(normalized, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return repos.FirstOrDefault(r => r.RepoKind == ProductRepoKinds.WebApp) ?? repos[0];
+    }
+
+    private static ProductRepoDTO ToRepoDto(ProductRepoRecord r) => new()
+    {
+        Id = r.Id,
+        RepoKind = r.RepoKind,
+        Title = r.Title,
+        GithubRepoUrl = r.GithubRepoUrl
+    };
 
     public static bool TryParseRepo(string url, out string owner, out string repo)
     {
@@ -134,10 +230,15 @@ public class GithubReadService : IGithubReadService
         return !string.IsNullOrWhiteSpace(owner) && !string.IsNullOrWhiteSpace(repo);
     }
 
-    private static GithubCacheDTO BuildDto(string? repoUrl, GithubCacheEntity? pulls, GithubCacheEntity? commits) =>
+    private static GithubCacheDTO BuildDto(
+        ProductRepoRecord repo,
+        GithubCacheEntity? pulls,
+        GithubCacheEntity? commits) =>
         new()
         {
-            RepoUrl = repoUrl ?? pulls?.RepoUrl ?? commits?.RepoUrl,
+            RepoKey = repo.RepoKind,
+            RepoTitle = repo.Title,
+            RepoUrl = repo.GithubRepoUrl,
             PullsFetchedAt = pulls?.FetchedAt,
             CommitsFetchedAt = commits?.FetchedAt,
             Pulls = DeserializePulls(pulls?.PayloadJson),

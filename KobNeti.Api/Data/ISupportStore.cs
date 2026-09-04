@@ -83,7 +83,7 @@ public interface ISupportStore
 
     // GitHub read-only cache
     Task UpsertGithubCacheAsync(GithubCacheEntity cache);
-    Task<GithubCacheEntity?> GetGithubCacheAsync(string tenantId, string cacheKind);
+    Task<GithubCacheEntity?> GetGithubCacheAsync(string tenantId, string repoKey, string cacheKind);
 
     // Time entries (W5)
     Task<TimeEntryEntity> InsertTimeEntryAsync(TimeEntryEntity entry);

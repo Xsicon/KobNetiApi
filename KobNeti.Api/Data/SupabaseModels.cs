@@ -1,5 +1,6 @@
 using Postgrest.Attributes;
 using Postgrest.Models;
+using KobNeti.Api.Products;
 
 namespace KobNeti.Api.Data;
 
@@ -260,6 +261,19 @@ public class SbCalendarEvent : BaseModel
 
 [Table("eng_github_cache")]
 public class SbGithubCache : BaseModel
+{
+    [PrimaryKey("id", false)] public Guid Id { get; set; }
+    [Column("tenant_id")] public string TenantId { get; set; } = string.Empty;
+    [Column("repo_key")] public string RepoKey { get; set; } = ProductRepoKinds.WebApp;
+    [Column("repo_url")] public string RepoUrl { get; set; } = string.Empty;
+    [Column("cache_kind")] public string CacheKind { get; set; } = string.Empty;
+    [Column("payload_json")] public string PayloadJson { get; set; } = "[]";
+    [Column("fetched_at")] public DateTime FetchedAt { get; set; }
+}
+
+/// <summary>Pre–product_repos migration shape (no repo_key column).</summary>
+[Table("eng_github_cache")]
+public class SbGithubCacheLegacy : BaseModel
 {
     [PrimaryKey("id", false)] public Guid Id { get; set; }
     [Column("tenant_id")] public string TenantId { get; set; } = string.Empty;

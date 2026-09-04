@@ -4,6 +4,7 @@ using System.Text.Json;
 using KobNeti.Api.Data;
 using KobNeti.Api.DTOs;
 using KobNeti.Api.Shared;
+using KobNeti.Api.Storage;
 using Microsoft.Extensions.Configuration;
 
 namespace KobNeti.Api.Services;
@@ -286,14 +287,30 @@ public interface IOpsFileService
 {
     Task<Response<List<OpsFileDTO>>> ListAsync(string tenantId, string? folderPath);
     Task<Response<OpsFileDTO>> CreateAsync(string tenantId, CreateOpsFileDTO request, Guid? userId, string? userName);
+    Task<Response<OpsFileDTO>> UploadAsync(
+        string tenantId,
+        string folderPath,
+        string fileName,
+        string contentType,
+        Stream content,
+        long length,
+        Guid? userId,
+        string? userName);
     Task<Response<object>> DeleteAsync(string tenantId, Guid id);
 }
 
 public class OpsFileService : IOpsFileService
 {
-    private readonly ISupportStore _store;
+    private const long MaxUploadBytes = 25 * 1024 * 1024;
 
-    public OpsFileService(ISupportStore store) => _store = store;
+    private readonly ISupportStore _store;
+    private readonly ISupabaseStorageUploader _storage;
+
+    public OpsFileService(ISupportStore store, ISupabaseStorageUploader storage)
+    {
+        _store = store;
+        _storage = storage;
+    }
 
     public async Task<Response<List<OpsFileDTO>>> ListAsync(string tenantId, string? folderPath)
     {
@@ -325,7 +342,62 @@ public class OpsFileService : IOpsFileService
             CreatedAt = DateTime.UtcNow
         };
         await _store.InsertOpsFileAsync(file);
-        return Response<OpsFileDTO>.SuccessResponse(Map(file), "File registered (product-scoped; separate from ticket uploads)");
+        return Response<OpsFileDTO>.SuccessResponse(Map(file), "File registered (metadata only)");
+    }
+
+    public async Task<Response<OpsFileDTO>> UploadAsync(
+        string tenantId,
+        string folderPath,
+        string fileName,
+        string contentType,
+        Stream content,
+        long length,
+        Guid? userId,
+        string? userName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+            return Response<OpsFileDTO>.Fail("File name is required");
+        if (length <= 0)
+            return Response<OpsFileDTO>.Fail("File is empty");
+        if (length > MaxUploadBytes)
+            return Response<OpsFileDTO>.Fail("File must be 25 MB or less");
+
+        var folder = NormalizeFolder(folderPath);
+        var id = Guid.NewGuid();
+        var safeName = Path.GetFileName(fileName.Trim());
+        var objectKey = BuildObjectKey(tenantId, folder, id, safeName);
+        string? publicUrl = null;
+        string message;
+
+        if (_storage.IsConfigured)
+        {
+            var upload = await _storage.UploadAsync(objectKey, content, contentType);
+            if (!upload.Ok)
+                return Response<OpsFileDTO>.Fail(upload.Error ?? "Storage upload failed");
+            publicUrl = upload.PublicUrl;
+            message = "File uploaded";
+        }
+        else
+        {
+            message = "File recorded (enable Supabase ServiceRoleKey + ops-files bucket for storage upload)";
+        }
+
+        var file = new OpsFileEntity
+        {
+            Id = id,
+            TenantId = tenantId,
+            FolderPath = folder,
+            FileName = safeName,
+            ContentType = contentType,
+            SizeBytes = length,
+            StoragePath = objectKey,
+            PublicUrl = publicUrl,
+            CreatedBy = userId,
+            CreatedByName = userName,
+            CreatedAt = DateTime.UtcNow
+        };
+        await _store.InsertOpsFileAsync(file);
+        return Response<OpsFileDTO>.SuccessResponse(Map(file), message);
     }
 
     public async Task<Response<object>> DeleteAsync(string tenantId, Guid id)
@@ -341,6 +413,16 @@ public class OpsFileService : IOpsFileService
         if (!p.StartsWith('/')) p = "/" + p;
         if (!p.EndsWith('/')) p += "/";
         return p;
+    }
+
+    private static string BuildObjectKey(string tenantId, string folder, Guid id, string fileName)
+    {
+        var folderSegment = folder.Trim('/').Replace('/', Path.DirectorySeparatorChar);
+        var parts = new List<string> { tenantId.Trim() };
+        if (!string.IsNullOrWhiteSpace(folderSegment))
+            parts.AddRange(folderSegment.Split('/', StringSplitOptions.RemoveEmptyEntries));
+        parts.Add($"{id:N}_{fileName}");
+        return string.Join('/', parts);
     }
 
     private static OpsFileDTO Map(OpsFileEntity f) => new()

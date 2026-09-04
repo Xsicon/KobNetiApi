@@ -121,6 +121,28 @@ public class OpsFilesController : ApiControllerBase
             AdminRoleClaims.GetUserId(User),
             AdminRoleClaims.GetDisplayName(User)));
 
+    [HttpPost("upload")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(26_214_400)]
+    [RequestFormLimits(MultipartBodyLengthLimit = 26_214_400)]
+    public async Task<ActionResult<Response<OpsFileDTO>>> Upload(
+        IFormFile file,
+        [FromForm] string? folder = "/")
+    {
+        if (file is null || file.Length == 0)
+            return BadRequest(Response<OpsFileDTO>.Fail("File is required"));
+        await using var stream = file.OpenReadStream();
+        return HandleResponse(await _files.UploadAsync(
+            RequireTenantId(_tenant),
+            folder ?? "/",
+            file.FileName,
+            file.ContentType,
+            stream,
+            file.Length,
+            AdminRoleClaims.GetUserId(User),
+            AdminRoleClaims.GetDisplayName(User)));
+    }
+
     [HttpDelete("{id:guid}")]
     public async Task<ActionResult<Response<object>>> Delete(Guid id) =>
         HandleResponse(await _files.DeleteAsync(RequireTenantId(_tenant), id));

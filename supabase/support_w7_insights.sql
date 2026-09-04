@@ -78,22 +78,7 @@ create table if not exists sominnercore.ops_assets (
 create index if not exists ix_ops_assets_tenant_status
   on sominnercore.ops_assets (tenant_id, status, renewal_date);
 
--- Seed a few platform help articles (idempotent)
-insert into sominnercore.ops_help_articles (slug, title, body, category, status, sort_order)
-values
-  ('getting-started', 'Getting started with KobNeti',
-   'Use the product switcher to pick a brand, then open Support, Engineering, or People Ops.',
-   'general', 'published', 1),
-  ('support-hub', 'Support Hub',
-   'Live chat, tickets, incidents, and product KB live under Support Hub. Switch products from the sidebar.',
-   'support', 'published', 2),
-  ('time-payroll', 'Time & payroll',
-   'Clock in/out under Time & Approvals. Payroll runs use approved time only.',
-   'people', 'published', 3)
-on conflict (slug) do update set
-  title = excluded.title,
-  body = excluded.body,
-  updated_at = timezone('utc', now());
+-- Seed platform help articles: run support_platform_help_seed.sql for full internal docs
 
 revoke all on table sominnercore.ops_help_articles from anon, authenticated;
 revoke all on table sominnercore.ops_report_runs from anon, authenticated;

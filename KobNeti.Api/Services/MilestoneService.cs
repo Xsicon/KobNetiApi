@@ -21,6 +21,7 @@ public class MilestoneService : IMilestoneService
 
     public async Task<Response<List<MilestoneDTO>>> ListAsync(string tenantId)
     {
+        await EngineeringSampleData.EnsureSeededAsync(_store, tenantId);
         var milestones = await _store.ListMilestonesAsync(tenantId);
         var (tasks, _) = await _store.ListEngTasksAsync(tenantId, null, null, 1, 500);
         var counts = tasks.Where(t => t.MilestoneId.HasValue)

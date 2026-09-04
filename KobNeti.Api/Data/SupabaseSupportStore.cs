@@ -1,4 +1,5 @@
 using KobNeti.Api.DTOs;
+using KobNeti.Api.Products;
 using static Postgrest.Constants;
 
 namespace KobNeti.Api.Data;
@@ -6,6 +7,7 @@ namespace KobNeti.Api.Data;
 public class SupabaseSupportStore : ISupportStore
 {
     private readonly Supabase.Client _client;
+    private bool? _githubCacheHasRepoKey;
 
     public SupabaseSupportStore(Supabase.Client client)
     {
@@ -627,7 +629,16 @@ public class SupabaseSupportStore : ISupportStore
 
     public async Task UpsertGithubCacheAsync(GithubCacheEntity cache)
     {
-        var existing = await GetGithubCacheAsync(cache.TenantId, cache.CacheKind);
+        if (!await GithubCacheHasRepoKeyAsync())
+        {
+            if (!string.Equals(cache.RepoKey, ProductRepoKinds.WebApp, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            await UpsertGithubCacheLegacyAsync(cache);
+            return;
+        }
+
+        var existing = await GetGithubCacheAsync(cache.TenantId, cache.RepoKey, cache.CacheKind);
         if (existing is null)
         {
             await _client.From<SbGithubCache>().Insert(ToSb(cache));
@@ -641,14 +652,81 @@ public class SupabaseSupportStore : ISupportStore
             .Update(ToSb(cache));
     }
 
-    public async Task<GithubCacheEntity?> GetGithubCacheAsync(string tenantId, string cacheKind)
+    public async Task<GithubCacheEntity?> GetGithubCacheAsync(string tenantId, string repoKey, string cacheKind)
     {
-        var response = await _client.From<SbGithubCache>()
+        if (!await GithubCacheHasRepoKeyAsync())
+        {
+            if (!string.Equals(repoKey, ProductRepoKinds.WebApp, StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            return await GetGithubCacheLegacyAsync(tenantId, cacheKind);
+        }
+
+        try
+        {
+            var response = await _client.From<SbGithubCache>()
+                .Filter("tenant_id", Operator.Equals, tenantId)
+                .Filter("repo_key", Operator.Equals, repoKey)
+                .Filter("cache_kind", Operator.Equals, cacheKind)
+                .Get();
+            var model = (response.Models ?? []).FirstOrDefault();
+            return model is null ? null : ToEntity(model);
+        }
+        catch (Exception ex) when (IsMissingGithubRepoKeyColumn(ex))
+        {
+            _githubCacheHasRepoKey = false;
+            if (!string.Equals(repoKey, ProductRepoKinds.WebApp, StringComparison.OrdinalIgnoreCase))
+                return null;
+            return await GetGithubCacheLegacyAsync(tenantId, cacheKind);
+        }
+    }
+
+    private async Task<bool> GithubCacheHasRepoKeyAsync()
+    {
+        if (_githubCacheHasRepoKey.HasValue)
+            return _githubCacheHasRepoKey.Value;
+
+        try
+        {
+            await _client.From<SbGithubCache>()
+                .Filter("tenant_id", Operator.Equals, "__schema_probe__")
+                .Filter("repo_key", Operator.Equals, ProductRepoKinds.WebApp)
+                .Limit(1)
+                .Get();
+            _githubCacheHasRepoKey = true;
+        }
+        catch (Exception ex) when (IsMissingGithubRepoKeyColumn(ex))
+        {
+            _githubCacheHasRepoKey = false;
+        }
+
+        return _githubCacheHasRepoKey ?? false;
+    }
+
+    private async Task<GithubCacheEntity?> GetGithubCacheLegacyAsync(string tenantId, string cacheKind)
+    {
+        var response = await _client.From<SbGithubCacheLegacy>()
             .Filter("tenant_id", Operator.Equals, tenantId)
             .Filter("cache_kind", Operator.Equals, cacheKind)
             .Get();
         var model = (response.Models ?? []).FirstOrDefault();
-        return model is null ? null : ToEntity(model);
+        return model is null ? null : ToEntityLegacy(model);
+    }
+
+    private async Task UpsertGithubCacheLegacyAsync(GithubCacheEntity cache)
+    {
+        var existing = await GetGithubCacheLegacyAsync(cache.TenantId, cache.CacheKind);
+        if (existing is null)
+        {
+            await _client.From<SbGithubCacheLegacy>().Insert(ToSbLegacy(cache));
+            return;
+        }
+
+        cache.Id = existing.Id;
+        await _client.From<SbGithubCacheLegacy>()
+            .Filter("tenant_id", Operator.Equals, cache.TenantId)
+            .Filter("id", Operator.Equals, cache.Id.ToString())
+            .Update(ToSbLegacy(cache));
     }
 
     public async Task<TimeEntryEntity> InsertTimeEntryAsync(TimeEntryEntity entry)
@@ -1600,10 +1678,32 @@ public class SupabaseSupportStore : ISupportStore
         UpdatedAt = e.UpdatedAt
     };
 
+    private static GithubCacheEntity ToEntityLegacy(SbGithubCacheLegacy m) => new()
+    {
+        Id = m.Id,
+        TenantId = m.TenantId,
+        RepoKey = ProductRepoKinds.WebApp,
+        RepoUrl = m.RepoUrl,
+        CacheKind = m.CacheKind,
+        PayloadJson = m.PayloadJson,
+        FetchedAt = m.FetchedAt
+    };
+
+    private static SbGithubCacheLegacy ToSbLegacy(GithubCacheEntity e) => new()
+    {
+        Id = e.Id,
+        TenantId = e.TenantId,
+        RepoUrl = e.RepoUrl,
+        CacheKind = e.CacheKind,
+        PayloadJson = e.PayloadJson,
+        FetchedAt = e.FetchedAt
+    };
+
     private static GithubCacheEntity ToEntity(SbGithubCache m) => new()
     {
         Id = m.Id,
         TenantId = m.TenantId,
+        RepoKey = string.IsNullOrWhiteSpace(m.RepoKey) ? ProductRepoKinds.WebApp : m.RepoKey,
         RepoUrl = m.RepoUrl,
         CacheKind = m.CacheKind,
         PayloadJson = m.PayloadJson,
@@ -1614,6 +1714,7 @@ public class SupabaseSupportStore : ISupportStore
     {
         Id = e.Id,
         TenantId = e.TenantId,
+        RepoKey = string.IsNullOrWhiteSpace(e.RepoKey) ? ProductRepoKinds.WebApp : e.RepoKey,
         RepoUrl = e.RepoUrl,
         CacheKind = e.CacheKind,
         PayloadJson = e.PayloadJson,
@@ -1898,5 +1999,12 @@ public class SupabaseSupportStore : ISupportStore
                || text.Contains("42P01", StringComparison.OrdinalIgnoreCase)
                || text.Contains("PGRST205", StringComparison.OrdinalIgnoreCase)
                || text.Contains("Could not find the table", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsMissingGithubRepoKeyColumn(Exception ex)
+    {
+        var text = ex.ToString();
+        return text.Contains("42703", StringComparison.OrdinalIgnoreCase)
+               && text.Contains("repo_key", StringComparison.OrdinalIgnoreCase);
     }
 }
