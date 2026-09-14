@@ -93,7 +93,7 @@ public sealed class PasswordResetService : IPasswordResetService
         var text =
             $"Reset your KobNeti password\n\nOpen this link to choose a new password:\n{actionLink}\n\nIf you did not request this, ignore this email.";
 
-        var (ok, error) = await _email.SendAsync(normalized, subject, html, text, ct);
+        var (ok, error) = await _email.SendAsync(normalized, subject, html, text, ct, "password-reset");
         if (!ok)
         {
             _logger.LogWarning("Password reset email not sent: {Error}", error);
@@ -130,16 +130,7 @@ public sealed class PasswordResetService : IPasswordResetService
             return null;
         }
 
-        using var doc = System.Text.Json.JsonDocument.Parse(json);
-        if (doc.RootElement.TryGetProperty("action_link", out var linkEl))
-            return linkEl.GetString();
-
-        // Some responses nest under "properties"
-        if (doc.RootElement.TryGetProperty("properties", out var props)
-            && props.TryGetProperty("action_link", out var nested))
-            return nested.GetString();
-
-        return null;
+        return SupabaseAuthLink.FromGenerateLinkJson(json, redirectTo);
     }
 }
 

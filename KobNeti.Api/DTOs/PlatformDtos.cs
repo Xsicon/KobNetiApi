@@ -100,5 +100,6 @@ public static class AuditActions
     public const string StaffInvite = "staff.invite";
     public const string StaffProducts = "staff.products";
     public const string StaffActivate = "staff.activate";
+    public const string StaffStatus = "staff.status";
     public const string IncidentEscalate = "incident.escalate";
 }

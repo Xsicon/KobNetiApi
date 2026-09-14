@@ -90,9 +90,11 @@ builder.Services.AddScoped<IInternalChatService, InternalChatService>();
 builder.Services.AddScoped<IAssetService, AssetService>();
 
 builder.Services.Configure<PostmarkOptions>(builder.Configuration.GetSection(PostmarkOptions.SectionName));
-builder.Services.AddHttpClient<IEmailSender, PostmarkEmailSender>();
+builder.Services.AddSingleton<IEmailSender, PostmarkEmailSender>();
 builder.Services.AddHttpClient("supabase-admin");
+builder.Services.AddScoped<IStaffAuthSync, StaffAuthSync>();
 builder.Services.AddScoped<IPasswordResetService, PasswordResetService>();
+builder.Services.AddScoped<IStaffInviteEmailService, StaffInviteEmailService>();
 
 builder.Services
     .AddAuthentication(TenantJwtAuthenticationHandler.SchemeName)

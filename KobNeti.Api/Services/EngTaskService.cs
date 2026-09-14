@@ -1,6 +1,7 @@
 using KobNeti.Api.Data;
 using KobNeti.Api.DTOs;
 using KobNeti.Api.Shared;
+using KobNeti.Api.Staff;
 
 namespace KobNeti.Api.Services;
 
@@ -15,13 +16,18 @@ public interface IEngTaskService
 public class EngTaskService : IEngTaskService
 {
     private readonly ISupportStore _store;
+    private readonly IStaffDirectory _staff;
 
-    public EngTaskService(ISupportStore store) => _store = store;
+    public EngTaskService(ISupportStore store, IStaffDirectory staff)
+    {
+        _store = store;
+        _staff = staff;
+    }
 
     public async Task<Response<List<EngTaskDTO>>> ListAsync(
         string tenantId, string? status, Guid? milestoneId, int page, int pageSize)
     {
-        await EngineeringSampleData.EnsureSeededAsync(_store, tenantId);
+        await EngineeringSampleData.EnsureSeededAsync(_store, tenantId, _staff);
         var (items, _) = await _store.ListEngTasksAsync(tenantId, status, milestoneId, page, pageSize);
         return Response<List<EngTaskDTO>>.SuccessResponse(items.Select(Map).ToList(), "Tasks loaded");
     }
@@ -79,7 +85,7 @@ public class EngTaskService : IEngTaskService
             Status = status,
             Priority = priority,
             EstimatePoints = request.EstimatePoints,
-            AssigneeName = string.IsNullOrWhiteSpace(request.AssigneeName) ? actorName : request.AssigneeName.Trim(),
+            AssigneeName = Members.Join(CreateMembers(request, actorName)),
             AssigneeUserId = actorUserId,
             TicketId = request.TicketId,
             MilestoneId = request.MilestoneId,
@@ -87,12 +93,12 @@ public class EngTaskService : IEngTaskService
             CreatedAt = now,
             UpdatedAt = now
         };
-        await _store.InsertEngTaskAsync(task);
+        var saved = await _store.InsertEngTaskAsync(task);
 
-        if (task.TicketId.HasValue)
-            await LinkTicketAsync(tenantId, task.TicketId.Value, task.Id);
+        if (saved.TicketId.HasValue)
+            await LinkTicketAsync(tenantId, saved.TicketId.Value, saved.Id);
 
-        return Response<EngTaskDTO>.SuccessResponse(Map(task), "Task created");
+        return Response<EngTaskDTO>.SuccessResponse(Map(saved), "Task created");
     }
 
     public async Task<Response<EngTaskDTO>> UpdateAsync(string tenantId, Guid id, UpdateEngTaskDTO request)
@@ -132,7 +138,9 @@ public class EngTaskService : IEngTaskService
 
         if (request.EstimatePoints.HasValue)
             task.EstimatePoints = request.EstimatePoints;
-        if (request.AssigneeName != null)
+        if (request.AssigneeNames != null)
+            task.AssigneeName = Members.Join(request.AssigneeNames);
+        else if (request.AssigneeName != null)
             task.AssigneeName = string.IsNullOrWhiteSpace(request.AssigneeName) ? null : request.AssigneeName.Trim();
 
         if (request.ClearTicketId)
@@ -208,12 +216,64 @@ public class EngTaskService : IEngTaskService
         Status = t.Status,
         Priority = t.Priority,
         EstimatePoints = t.EstimatePoints,
-        AssigneeName = t.AssigneeName,
+        AssigneeName = Members.Primary(t.AssigneeName),
         AssigneeUserId = t.AssigneeUserId,
+        AssigneeNames = Members.Parse(t.AssigneeName),
         TicketId = t.TicketId,
         MilestoneId = t.MilestoneId,
         GithubPrUrl = t.GithubPrUrl,
         CreatedAt = t.CreatedAt,
         UpdatedAt = t.UpdatedAt
     };
+
+    private static IEnumerable<string> CreateMembers(CreateEngTaskDTO request, string? actorName)
+    {
+        if (request.AssigneeNames is { Count: > 0 })
+            return request.AssigneeNames;
+        if (!string.IsNullOrWhiteSpace(request.AssigneeName))
+            return [request.AssigneeName];
+        if (!string.IsNullOrWhiteSpace(actorName))
+            return [actorName];
+        return [];
+    }
+
+    private static class Members
+    {
+        public static List<string> Parse(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return [];
+
+            var trimmed = raw.Trim();
+            if (trimmed.StartsWith('['))
+            {
+                try
+                {
+                    var json = System.Text.Json.JsonSerializer.Deserialize<List<string>>(trimmed);
+                    if (json is { Count: > 0 })
+                        return Distinct(json);
+                }
+                catch (System.Text.Json.JsonException)
+                {
+                    // Fall through to delimiter parsing.
+                }
+            }
+
+            return Distinct(trimmed.Split(['\n', '|'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        }
+
+        public static string? Join(IEnumerable<string>? names)
+        {
+            var list = Distinct(names ?? []);
+            return list.Count == 0 ? null : string.Join('\n', list);
+        }
+
+        public static string? Primary(string? raw) => Parse(raw).FirstOrDefault();
+
+        private static List<string> Distinct(IEnumerable<string> names) =>
+            names.Select(n => n.Trim())
+                .Where(n => n.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+    }
 }

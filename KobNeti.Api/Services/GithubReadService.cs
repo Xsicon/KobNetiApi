@@ -5,6 +5,7 @@ using KobNeti.Api.Data;
 using KobNeti.Api.DTOs;
 using KobNeti.Api.Products;
 using KobNeti.Api.Shared;
+using KobNeti.Api.Staff;
 
 namespace KobNeti.Api.Services;
 
@@ -30,19 +31,22 @@ public class GithubReadService : IGithubReadService
     private readonly IProductRepoRegistry _repos;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<GithubReadService> _logger;
+    private readonly IStaffDirectory _staff;
 
     public GithubReadService(
         ISupportStore store,
         IProductRegistry products,
         IProductRepoRegistry repos,
         IHttpClientFactory httpClientFactory,
-        ILogger<GithubReadService> logger)
+        ILogger<GithubReadService> logger,
+        IStaffDirectory staff)
     {
         _store = store;
         _products = products;
         _repos = repos;
         _httpClientFactory = httpClientFactory;
         _logger = logger;
+        _staff = staff;
     }
 
     public async Task<Response<List<ProductRepoDTO>>> ListReposAsync(string tenantId)
@@ -55,7 +59,7 @@ public class GithubReadService : IGithubReadService
 
     public async Task<Response<GithubCacheDTO>> GetCachedAsync(string tenantId, string? repoKey = null)
     {
-        await EngineeringSampleData.EnsureSeededAsync(_store, tenantId);
+        await EngineeringSampleData.EnsureSeededAsync(_store, tenantId, _staff);
         var resolved = await ResolveReposAsync(tenantId);
         if (resolved.Count == 0)
             return Response<GithubCacheDTO>.SuccessResponse(new GithubCacheDTO(), "No linked repos");
@@ -255,10 +259,15 @@ public class GithubReadService : IGithubReadService
             {
                 number = item.TryGetProperty("number", out var n) ? n.GetInt32() : 0,
                 title = item.TryGetProperty("title", out var t) ? t.GetString() : "",
-                state = item.TryGetProperty("state", out var s) ? s.GetString() : "",
+                state = item.TryGetProperty("merged_at", out var merged) && merged.ValueKind is JsonValueKind.String
+                    ? "merged"
+                    : item.TryGetProperty("state", out var s) ? s.GetString() : "",
                 html_url = item.TryGetProperty("html_url", out var u) ? u.GetString() : "",
                 author = item.TryGetProperty("user", out var user) && user.TryGetProperty("login", out var login)
                     ? login.GetString()
+                    : null,
+                head_ref = item.TryGetProperty("head", out var head) && head.TryGetProperty("ref", out var href)
+                    ? href.GetString()
                     : null,
                 updated_at = item.TryGetProperty("updated_at", out var ua) ? ua.GetString() : null
             });
@@ -311,6 +320,7 @@ public class GithubReadService : IGithubReadService
                     State = item.TryGetProperty("state", out var s) ? s.GetString() ?? "" : "",
                     HtmlUrl = item.TryGetProperty("html_url", out var u) ? u.GetString() ?? "" : "",
                     Author = item.TryGetProperty("author", out var a) ? a.GetString() : null,
+                    HeadRef = item.TryGetProperty("head_ref", out var href) ? href.GetString() : null,
                     UpdatedAt = item.TryGetProperty("updated_at", out var ua) && DateTime.TryParse(ua.GetString(), out var dt)
                         ? dt.ToUniversalTime()
                         : null

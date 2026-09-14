@@ -1,6 +1,7 @@
 using KobNeti.Api.Data;
 using KobNeti.Api.DTOs;
 using KobNeti.Api.Shared;
+using KobNeti.Api.Staff;
 
 namespace KobNeti.Api.Services;
 
@@ -16,12 +17,17 @@ public interface IMilestoneService
 public class MilestoneService : IMilestoneService
 {
     private readonly ISupportStore _store;
+    private readonly IStaffDirectory _staff;
 
-    public MilestoneService(ISupportStore store) => _store = store;
+    public MilestoneService(ISupportStore store, IStaffDirectory staff)
+    {
+        _store = store;
+        _staff = staff;
+    }
 
     public async Task<Response<List<MilestoneDTO>>> ListAsync(string tenantId)
     {
-        await EngineeringSampleData.EnsureSeededAsync(_store, tenantId);
+        await EngineeringSampleData.EnsureSeededAsync(_store, tenantId, _staff);
         var milestones = await _store.ListMilestonesAsync(tenantId);
         var (tasks, _) = await _store.ListEngTasksAsync(tenantId, null, null, 1, 500);
         var counts = tasks.Where(t => t.MilestoneId.HasValue)
@@ -46,8 +52,8 @@ public class MilestoneService : IMilestoneService
         if (string.IsNullOrWhiteSpace(request.Title))
             return Response<MilestoneDTO>.Fail("Title is required");
 
-        var status = (request.Status ?? MilestoneStatus.Planned).Trim().ToLowerInvariant();
-        if (!MilestoneStatus.All.Contains(status))
+        var status = MilestoneStatus.Normalize(request.Status);
+        if (status is null)
             return Response<MilestoneDTO>.Fail("Invalid status");
 
         var now = DateTime.UtcNow;
@@ -64,9 +70,9 @@ public class MilestoneService : IMilestoneService
             CreatedAt = now,
             UpdatedAt = now
         };
-        await _store.InsertMilestoneAsync(milestone);
-        await SyncCalendarAsync(tenantId, milestone);
-        return Response<MilestoneDTO>.SuccessResponse(Map(milestone, 0), "Milestone created");
+        var saved = await _store.InsertMilestoneAsync(milestone);
+        await SyncCalendarAsync(tenantId, saved);
+        return Response<MilestoneDTO>.SuccessResponse(Map(saved, 0), "Milestone created");
     }
 
     public async Task<Response<MilestoneDTO>> UpdateAsync(string tenantId, Guid id, UpdateMilestoneDTO request)
@@ -82,8 +88,8 @@ public class MilestoneService : IMilestoneService
 
         if (!string.IsNullOrWhiteSpace(request.Status))
         {
-            var status = request.Status.Trim().ToLowerInvariant();
-            if (!MilestoneStatus.All.Contains(status))
+            var status = MilestoneStatus.Normalize(request.Status);
+            if (status is null)
                 return Response<MilestoneDTO>.Fail("Invalid status");
             milestone.Status = status;
         }

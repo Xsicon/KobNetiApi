@@ -12,6 +12,7 @@ public class EngTaskDTO
     public decimal? EstimatePoints { get; set; }
     public string? AssigneeName { get; set; }
     public Guid? AssigneeUserId { get; set; }
+    public List<string> AssigneeNames { get; set; } = [];
     public Guid? TicketId { get; set; }
     public Guid? MilestoneId { get; set; }
     public string? GithubPrUrl { get; set; }
@@ -28,6 +29,7 @@ public class CreateEngTaskDTO
     public string Priority { get; set; } = EngTaskPriority.Medium;
     public decimal? EstimatePoints { get; set; }
     public string? AssigneeName { get; set; }
+    public List<string>? AssigneeNames { get; set; }
     public Guid? TicketId { get; set; }
     public Guid? MilestoneId { get; set; }
     public string? GithubPrUrl { get; set; }
@@ -42,6 +44,7 @@ public class UpdateEngTaskDTO
     public string? Priority { get; set; }
     public decimal? EstimatePoints { get; set; }
     public string? AssigneeName { get; set; }
+    public List<string>? AssigneeNames { get; set; }
     public Guid? TicketId { get; set; }
     public bool ClearTicketId { get; set; }
     public Guid? MilestoneId { get; set; }
@@ -119,6 +122,7 @@ public class GithubPullDTO
     public string State { get; set; } = string.Empty;
     public string HtmlUrl { get; set; } = string.Empty;
     public string? Author { get; set; }
+    public string? HeadRef { get; set; }
     public DateTime? UpdatedAt { get; set; }
 }
 
@@ -171,7 +175,22 @@ public static class MilestoneStatus
 {
     public const string Planned = "planned";
     public const string Active = "active";
+    public const string AtRisk = "at_risk";
     public const string Completed = "completed";
     public const string Cancelled = "cancelled";
-    public static readonly string[] All = [Planned, Active, Completed, Cancelled];
+    public static readonly string[] All = [Planned, Active, AtRisk, Completed, Cancelled];
+
+    public static string? Normalize(string? status)
+    {
+        var value = (status ?? Planned).Trim().ToLowerInvariant();
+        return value switch
+        {
+            "planned" or "open" => Planned,
+            "active" or "in_progress" => Active,
+            "at_risk" or "at-risk" => AtRisk,
+            "completed" or "done" => Completed,
+            "cancelled" or "canceled" => Cancelled,
+            _ => null
+        };
+    }
 }

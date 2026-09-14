@@ -83,7 +83,7 @@ public class TenantJwtAuthenticationHandler : AuthenticationHandler<Authenticati
             NameClaimType = ClaimTypes.Name
         };
 
-        var handler = new JwtSecurityTokenHandler();
+        var handler = new JwtSecurityTokenHandler { MapInboundClaims = false };
         return handler.ValidateToken(token, parameters, out _);
     }
 }

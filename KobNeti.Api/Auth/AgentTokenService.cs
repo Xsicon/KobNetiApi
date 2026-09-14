@@ -31,6 +31,7 @@ public class AgentTokenService : IAgentTokenService
     private readonly IStaffDirectory _staff;
     private readonly IProductRegistry _products;
     private readonly IAuditService _audit;
+    private readonly IStaffAuthSync _authSync;
 
     public AgentTokenService(
         IOptions<SupportOptions> options,
@@ -38,7 +39,8 @@ public class AgentTokenService : IAgentTokenService
         IHttpClientFactory httpClientFactory,
         IStaffDirectory staff,
         IProductRegistry products,
-        IAuditService audit)
+        IAuditService audit,
+        IStaffAuthSync authSync)
     {
         _options = options.Value;
         _configuration = configuration;
@@ -46,6 +48,7 @@ public class AgentTokenService : IAgentTokenService
         _staff = staff;
         _products = products;
         _audit = audit;
+        _authSync = authSync;
     }
 
     public async Task<(bool Ok, string? Token, string? Error)> ExchangeSupabaseTokenAsync(string supabaseAccessToken)
@@ -112,6 +115,26 @@ public class AgentTokenService : IAgentTokenService
         var isCoreAdmin = IsCoreAdminEmail(email)
                           || (supabaseUser is { } root && IsAdminFromUserJson(root));
 
+        if (staff is null && isCoreAdmin)
+        {
+            try
+            {
+                staff = await _staff.InviteAsync(
+                    email,
+                    userName,
+                    StaffRoles.Admin,
+                    [],
+                    default,
+                    [StaffRoles.Admin],
+                    invitedByEmail: null,
+                    recordInvite: false);
+            }
+            catch
+            {
+                // listing in staff_profiles is best-effort; login must still succeed
+            }
+        }
+
         string role;
         List<string> products;
 
@@ -123,11 +146,8 @@ public class AgentTokenService : IAgentTokenService
         else if (staff is not null && staff.Active)
         {
             role = staff.Role;
-            if (!StaffRoles.CanUseSupportApis(role) && !string.Equals(role, StaffRoles.Engineer, StringComparison.OrdinalIgnoreCase))
+            if (!StaffRoles.CanAccessOpsPlatform(role))
                 return (false, null, $"Role '{role}' is not allowed.");
-
-            if (!StaffRoles.CanUseSupportApis(role))
-                return (false, null, $"Role '{role}' cannot access Support APIs.");
 
             products = staff.ProductSlugs.ToList();
             if (products.Count == 0)
@@ -151,10 +171,20 @@ public class AgentTokenService : IAgentTokenService
                 $"User is not KobNeti staff ({email}). Add staff_profiles row or Support:CoreAdminEmails / Support:Staff.");
         }
 
-        if (!StaffRoles.CanUseSupportApis(role))
-            return (false, null, $"Role '{role}' cannot access Support APIs.");
+        if (!StaffRoles.CanAccessOpsPlatform(role))
+            return (false, null, $"Role '{role}' cannot access the Operations platform.");
+
+        await _authSync.TryGrantOpsRoleAsync(userId, email, role);
 
         var token = CreateAgentToken(userId, email, role, userName, products);
+        try
+        {
+            await _staff.TouchLastActiveAsync(email, userId);
+        }
+        catch
+        {
+            // never block login on last-active write
+        }
         try
         {
             await _audit.WriteAsync("ops", AuditActions.AuthExchange, "auth", userId.ToString(),
@@ -186,6 +216,7 @@ public class AgentTokenService : IAgentTokenService
             new(JwtRegisteredClaimNames.Sub, userId.ToString()),
             new(ClaimTypes.NameIdentifier, userId.ToString()),
             new(JwtRegisteredClaimNames.Email, email),
+            new(ClaimTypes.Email, email),
             new(AdminRoleClaims.RoleClaimType, role)
         };
 

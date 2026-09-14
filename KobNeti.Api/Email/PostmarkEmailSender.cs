@@ -1,15 +1,18 @@
+using PostmarkDotNet;
+
 namespace KobNeti.Api.Email;
 
 public class PostmarkOptions
 {
     public const string SectionName = "Postmark";
 
-    /// <summary>Server API token. Use POSTMARK_API_TEST for dry-run validation.</summary>
+    /// <summary>Server API token from Postmark.</summary>
     public string ServerToken { get; set; } = "";
 
-    /// <summary>Verified sender, e.g. KobNeti Ops &lt;noreply@kobneti.com&gt;</summary>
-    public string FromEmail { get; set; } = "KobNeti Ops <noreply@kobneti.com>";
+    /// <summary>Verified sender, e.g. info@kobneti.com</summary>
+    public string FromEmail { get; set; } = "info@kobneti.com";
 
+    /// <summary>Transactional stream. Use outbound for invites; broadcast is for campaigns.</summary>
     public string MessageStream { get; set; } = "outbound";
 
     public bool IsConfigured =>
@@ -23,24 +26,21 @@ public interface IEmailSender
         string subject,
         string htmlBody,
         string textBody,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        string tag = "ops");
 }
 
 public sealed class PostmarkEmailSender : IEmailSender
 {
-    private readonly HttpClient _http;
     private readonly PostmarkOptions _options;
     private readonly ILogger<PostmarkEmailSender> _logger;
 
     public PostmarkEmailSender(
-        HttpClient http,
         Microsoft.Extensions.Options.IOptions<PostmarkOptions> options,
         ILogger<PostmarkEmailSender> logger)
     {
-        _http = http;
         _options = options.Value;
         _logger = logger;
-        _http.BaseAddress ??= new Uri("https://api.postmarkapp.com/");
     }
 
     public async Task<(bool Ok, string? Error)> SendAsync(
@@ -48,41 +48,43 @@ public sealed class PostmarkEmailSender : IEmailSender
         string subject,
         string htmlBody,
         string textBody,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string tag = "ops")
     {
         if (!_options.IsConfigured)
             return (false, "Postmark is not configured (Postmark:ServerToken).");
 
-        using var req = new HttpRequestMessage(HttpMethod.Post, "email");
-        req.Headers.TryAddWithoutValidation("Accept", "application/json");
-        req.Headers.TryAddWithoutValidation("X-Postmark-Server-Token", _options.ServerToken.Trim());
-        req.Content = JsonContent.Create(new
-        {
-            From = _options.FromEmail,
-            To = toEmail,
-            Subject = subject,
-            HtmlBody = htmlBody,
-            TextBody = textBody,
-            MessageStream = _options.MessageStream,
-            Tag = "password-reset"
-        });
-
-        HttpResponseMessage res;
         try
         {
-            res = await _http.SendAsync(req, ct);
+            var message = new PostmarkMessage
+            {
+                To = toEmail.Trim(),
+                From = string.IsNullOrWhiteSpace(_options.FromEmail) ? "info@kobneti.com" : _options.FromEmail.Trim(),
+                TrackOpens = true,
+                Subject = subject,
+                TextBody = textBody,
+                HtmlBody = htmlBody,
+                MessageStream = string.IsNullOrWhiteSpace(_options.MessageStream) ? "outbound" : _options.MessageStream.Trim(),
+                Tag = string.IsNullOrWhiteSpace(tag) ? "ops" : tag
+            };
+
+            var client = new PostmarkClient(_options.ServerToken.Trim());
+            var sendResult = await client.SendMessageAsync(message);
+
+            if (sendResult.Status == PostmarkStatus.Success)
+                return (true, null);
+
+            var detail = string.IsNullOrWhiteSpace(sendResult.Message)
+                ? $"Postmark {sendResult.Status}"
+                : sendResult.Message;
+            _logger.LogWarning("Postmark rejected email to {Email}: {Error} (code {Code})",
+                toEmail, detail, sendResult.ErrorCode);
+            return (false, detail);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Postmark send failed for {Email}", toEmail);
-            return (false, "Failed to reach Postmark.");
+            return (false, ex.Message);
         }
-
-        if (res.IsSuccessStatusCode)
-            return (true, null);
-
-        var body = await res.Content.ReadAsStringAsync(ct);
-        _logger.LogWarning("Postmark rejected email ({Status}): {Body}", (int)res.StatusCode, body);
-        return (false, $"Postmark error {(int)res.StatusCode}");
     }
 }

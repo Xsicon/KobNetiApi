@@ -1,3 +1,4 @@
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using KobNeti.Api.Staff;
 
@@ -68,9 +69,28 @@ public static class AdminRoleClaims
         return Guid.TryParse(raw, out var id) ? id : null;
     }
 
+    public static string? GetEmail(ClaimsPrincipal user)
+    {
+        foreach (var type in new[]
+        {
+            ClaimTypes.Email,
+            JwtRegisteredClaimNames.Email,
+            "email",
+            ClaimTypes.Upn
+        })
+        {
+            var value = user.FindFirstValue(type);
+            if (!string.IsNullOrWhiteSpace(value) && value.Contains('@'))
+                return value.Trim();
+        }
+
+        return user.Claims
+            .Select(c => c.Value)
+            .FirstOrDefault(v => !string.IsNullOrWhiteSpace(v) && v.Contains('@', StringComparison.Ordinal));
+    }
+
     public static string GetDisplayName(ClaimsPrincipal user) =>
         user.FindFirstValue(ClaimTypes.Name)
-        ?? user.FindFirstValue("email")
-        ?? user.FindFirstValue(ClaimTypes.Email)
+        ?? GetEmail(user)
         ?? "Support Agent";
 }

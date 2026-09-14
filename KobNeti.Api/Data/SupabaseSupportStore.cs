@@ -550,7 +550,13 @@ public class SupabaseSupportStore : ISupportStore
     {
         var response = await _client.From<SbEngMilestone>().Insert(ToSb(milestone));
         var model = response.Models.FirstOrDefault();
-        return model is null ? milestone : ToEntity(model);
+        if (model is not null)
+            return ToEntity(model);
+
+        var listed = await ListMilestonesAsync(milestone.TenantId);
+        return listed.LastOrDefault(m =>
+            string.Equals(m.Title, milestone.Title, StringComparison.OrdinalIgnoreCase))
+            ?? milestone;
     }
 
     public async Task<EngMilestoneEntity?> GetMilestoneAsync(string tenantId, Guid milestoneId)

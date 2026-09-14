@@ -1,7 +1,9 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using KobNeti.Api.Data;
 using KobNeti.Api.DTOs;
 using KobNeti.Api.Products;
+using KobNeti.Api.Staff;
 
 namespace KobNeti.Api.Services;
 
@@ -16,28 +18,61 @@ public static class EngineeringSampleData
         "muuqwear", "salguri", "gaarx"
     };
 
-    public static async Task EnsureSeededAsync(ISupportStore store, string tenantId, CancellationToken ct = default)
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> SeedLocks = new(StringComparer.OrdinalIgnoreCase);
+
+    public static async Task EnsureSeededAsync(
+        ISupportStore store,
+        string tenantId,
+        IStaffDirectory? staffDirectory = null,
+        CancellationToken ct = default)
     {
         if (!DemoTenants.Contains(tenantId))
             return;
 
-        var (_, total) = await store.ListEngTasksAsync(tenantId, null, null, 1, 1);
+        var gate = SeedLocks.GetOrAdd(tenantId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
+        try
+        {
+            var roster = staffDirectory is null
+                ? (IReadOnlyList<StaffAccessRecord>)[]
+                : await staffDirectory.ListAsync(ct);
+            await SeedLockedAsync(store, tenantId, roster);
+            await RemapAssigneesToStaffAsync(store, tenantId, roster);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private static async Task SeedLockedAsync(
+        ISupportStore store,
+        string tenantId,
+        IReadOnlyList<StaffAccessRecord> roster)
+    {
+        var (_, total) = await store.ListEngTasksAsync(tenantId, null, null, 1, 500);
         if (total > 0)
             return;
 
+        var people = RosterForTenant(roster, tenantId);
+        StaffPick Pick(int i) => people.Count == 0 ? default : people[i % people.Count];
+
         var brand = BrandLabel(tenantId);
         var now = DateTime.UtcNow;
+        var existing = await store.ListMilestonesAsync(tenantId);
 
-        var msHoliday = await InsertMilestoneAsync(store, tenantId, $"{brand} Holiday Drop", "active",
+        // PostgREST omits client ids on insert ([PrimaryKey(..., false)]), so always
+        // keep the row returned from the store — never the Guid generated in memory.
+        var msHoliday = await EnsureMilestoneAsync(store, existing, tenantId, $"{brand} Holiday Drop", "active",
             now.AddDays(18), now.AddDays(-7), 1,
             "Launch festive collection, promo banners, and inventory sync with warehouse.");
-        var msCheckout = await InsertMilestoneAsync(store, tenantId, "Checkout & Payments Hardening", "active",
+        var msCheckout = await EnsureMilestoneAsync(store, existing, tenantId, "Checkout & Payments Hardening", "active",
             now.AddDays(8), now.AddDays(-14), 2,
             "3DS2, address validation, and payment retry logic before peak traffic.");
-        var msChat = await InsertMilestoneAsync(store, tenantId, "Support Widget v2", "planned",
+        var msChat = await EnsureMilestoneAsync(store, existing, tenantId, "Support Widget v2", "planned",
             now.AddDays(35), now.AddDays(5), 3,
             "Sticky notes, escalate-to-incident, and unread badge parity with KobNeti Support Hub.");
-        var msReturns = await InsertMilestoneAsync(store, tenantId, "Returns & Size Guide", "completed",
+        var msReturns = await EnsureMilestoneAsync(store, existing, tenantId, "Returns & Size Guide", "completed",
             now.AddDays(-28), now.AddDays(-45), 0,
             "Self-serve returns portal and bilingual size charts shipped.");
 
@@ -47,46 +82,50 @@ public static class EngineeringSampleData
         await SyncCalendarAsync(store, tenantId, msReturns);
 
         var seq = 0;
+        var p0 = Pick(0);
+        var p1 = Pick(1);
+        var p2 = Pick(2);
+        var p3 = Pick(3);
         await InsertTaskAsync(store, tenantId, ++seq, "Add Somali + Arabic size chart PDFs", "feature", "backlog", "medium",
-            3, "Adeel D.", msReturns.Id, null, now.AddDays(-2));
+            3, p0.Name, p0.UserId, null, null, now.AddDays(-2));
         await InsertTaskAsync(store, tenantId, ++seq, "M-Pesa refund webhook reconciliation", "feature", "backlog", "high",
-            5, "Sarah K.", msCheckout.Id, null, now.AddDays(-1));
+            5, p1.Name, p1.UserId, null, null, now.AddDays(-1));
         await InsertTaskAsync(store, tenantId, ++seq, "Wishlist share links for Instagram stories", "feature", "backlog", "low",
-            2, null, msHoliday.Id, null, now.AddDays(-3));
+            2, null, null, null, null, now.AddDays(-3));
 
         await InsertTaskAsync(store, tenantId, ++seq, "Fix Safari address autofill on checkout", "bug", "ready", "high",
-            2, "Ibrahim M.", msCheckout.Id, null, now.AddDays(-1));
+            2, p2.Name, p2.UserId, msCheckout.Id, null, now.AddDays(-1));
         await InsertTaskAsync(store, tenantId, ++seq, "Product API: cache stock counts per variant", "chore", "ready", "medium",
-            3, "Sarah K.", msHoliday.Id, null, now);
+            3, p1.Name, p1.UserId, msHoliday.Id, null, now);
 
         await InsertTaskAsync(store, tenantId, ++seq, "Live chat handoff uses Support Hub sticky notes", "feature", "in_progress", "critical",
-            5, "Adeel D.", msChat.Id, null, now);
+            5, p0.Name, p0.UserId, msChat.Id, null, now);
         await InsertTaskAsync(store, tenantId, ++seq, "CDN cache headers for lookbook images", "chore", "in_progress", "medium",
-            2, "Leila H.", msHoliday.Id, null, now.AddHours(-6));
+            2, p3.Name, p3.UserId, msHoliday.Id, null, now.AddHours(-6));
 
         var prUrl = tenantId.Equals("muuqwear", StringComparison.OrdinalIgnoreCase)
             ? "https://github.com/kobneti/muuqwear-web/pull/142"
             : null;
         await InsertTaskAsync(store, tenantId, ++seq, "Stripe 3DS2 for international cards", "feature", "in_review", "critical",
-            5, "Ibrahim M.", msCheckout.Id, prUrl, now.AddHours(-12));
+            5, p2.Name, p2.UserId, msCheckout.Id, prUrl, now.AddHours(-12));
 
         await InsertTaskAsync(store, tenantId, ++seq, "Deploy Ramadan promo landing page", "feature", "done", "high",
-            3, "Adeel D.", msHoliday.Id, null, now.AddDays(-10));
+            3, p0.Name, p0.UserId, msHoliday.Id, null, now.AddDays(-10));
         await InsertTaskAsync(store, tenantId, ++seq, "Fix guest cart merge null reference", "bug", "done", "high",
-            2, "Sarah K.", msCheckout.Id, null, now.AddDays(-7));
+            2, p1.Name, p1.UserId, msCheckout.Id, null, now.AddDays(-7));
         await InsertTaskAsync(store, tenantId, ++seq, "Returns portal SLA dashboard tiles", "feature", "done", "medium",
-            3, "Leila H.", msReturns.Id, null, now.AddDays(-20));
+            3, p3.Name, p3.UserId, msReturns.Id, null, now.AddDays(-20));
 
         if (tenantId.Equals("salguri", StringComparison.OrdinalIgnoreCase))
         {
             await InsertTaskAsync(store, tenantId, ++seq, "Wholesale price tier API", "feature", "in_progress", "high",
-                5, "Mike C.", msCheckout.Id, null, now);
+                5, p2.Name, p2.UserId, msCheckout.Id, null, now);
         }
 
         if (tenantId.Equals("gaarx", StringComparison.OrdinalIgnoreCase))
         {
             await InsertTaskAsync(store, tenantId, ++seq, "Driver GPS socket reconnect backoff", "bug", "in_review", "critical",
-                3, "Leila H.", msChat.Id, null, now);
+                3, p3.Name, p3.UserId, msChat.Id, null, now);
         }
 
         await SeedGithubCacheAsync(store, tenantId, now);
@@ -100,8 +139,9 @@ public static class EngineeringSampleData
         _ => tenantId
     };
 
-    private static async Task<EngMilestoneEntity> InsertMilestoneAsync(
+    private static async Task<EngMilestoneEntity> EnsureMilestoneAsync(
         ISupportStore store,
+        List<EngMilestoneEntity> existing,
         string tenantId,
         string title,
         string status,
@@ -110,8 +150,13 @@ public static class EngineeringSampleData
         int sortOrder,
         string? description)
     {
+        var found = existing.FirstOrDefault(m =>
+            string.Equals(m.Title, title, StringComparison.OrdinalIgnoreCase));
+        if (found is not null)
+            return found;
+
         var now = DateTime.UtcNow;
-        var milestone = new EngMilestoneEntity
+        var saved = await store.InsertMilestoneAsync(new EngMilestoneEntity
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
@@ -123,14 +168,23 @@ public static class EngineeringSampleData
             SortOrder = sortOrder,
             CreatedAt = now,
             UpdatedAt = now
-        };
-        await store.InsertMilestoneAsync(milestone);
-        return milestone;
+        });
+
+        if (await store.GetMilestoneAsync(tenantId, saved.Id) is null)
+        {
+            var listed = await store.ListMilestonesAsync(tenantId);
+            saved = listed.LastOrDefault(m =>
+                string.Equals(m.Title, title, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException($"Failed to persist milestone '{title}' for {tenantId}.");
+        }
+
+        existing.Add(saved);
+        return saved;
     }
 
     private static async Task SyncCalendarAsync(ISupportStore store, string tenantId, EngMilestoneEntity milestone)
     {
-        if (!milestone.TargetDate.HasValue)
+        if (!milestone.TargetDate.HasValue || milestone.CalendarEventId.HasValue)
             return;
 
         var starts = milestone.TargetDate.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
@@ -163,29 +217,99 @@ public static class EngineeringSampleData
         string priority,
         decimal points,
         string? assignee,
+        Guid? assigneeUserId,
         Guid? milestoneId,
         string? prUrl,
         DateTime updatedAt)
     {
-        var created = updatedAt.AddDays(-Random.Shared.Next(2, 12));
+        var created = updatedAt.AddDays(-Math.Clamp(seq, 2, 12));
         var task = new EngTaskEntity
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            TaskNumber = $"TASK-{created:yyyyMMdd}-{seq:D4}",
+            TaskNumber = $"TASK-SEED-{seq:D4}",
             Title = title,
             TaskType = type,
             Status = status,
             Priority = priority,
             EstimatePoints = points,
             AssigneeName = assignee,
+            AssigneeUserId = assigneeUserId,
             MilestoneId = milestoneId,
             GithubPrUrl = prUrl,
             CreatedAt = created,
             UpdatedAt = updatedAt
         };
-        await store.InsertEngTaskAsync(task);
+        try
+        {
+            await store.InsertEngTaskAsync(task);
+        }
+        catch (Exception ex) when (IsDuplicateKey(ex))
+        {
+            // Partial seed from a previous run — skip this row.
+        }
     }
+
+    private static bool IsDuplicateKey(Exception ex) =>
+        ex.Message.Contains("23505", StringComparison.Ordinal)
+        || ex.Message.Contains("duplicate key", StringComparison.OrdinalIgnoreCase);
+
+    private readonly record struct StaffPick(string? Name, Guid? UserId);
+
+    private static List<StaffPick> RosterForTenant(IReadOnlyList<StaffAccessRecord> roster, string tenantId)
+    {
+        var active = roster.Where(s => s.Active && StaffStatuses.IsLoginAllowed(s.Status)).ToList();
+        var scoped = active.Where(s =>
+            s.ProductSlugs.Count == 0
+            || s.ProductSlugs.Any(p => string.Equals(p, tenantId, StringComparison.OrdinalIgnoreCase))
+            || s.Roles.Any(r => string.Equals(r, StaffRoles.Admin, StringComparison.OrdinalIgnoreCase))
+            || string.Equals(s.Role, StaffRoles.Admin, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (scoped.Count == 0) scoped = active;
+        return scoped
+            .Select(s => new StaffPick(StaffLabel(s), s.UserId ?? s.Id))
+            .Where(p => !string.IsNullOrWhiteSpace(p.Name))
+            .ToList();
+    }
+
+    private static async Task RemapAssigneesToStaffAsync(
+        ISupportStore store,
+        string tenantId,
+        IReadOnlyList<StaffAccessRecord> roster)
+    {
+        var people = RosterForTenant(roster, tenantId);
+        if (people.Count == 0) return;
+
+        var (tasks, _) = await store.ListEngTasksAsync(tenantId, null, null, 1, 500);
+        var i = 0;
+        foreach (var task in tasks)
+        {
+            if (string.IsNullOrWhiteSpace(task.AssigneeName))
+                continue;
+            if (MatchesStaff(task.AssigneeName, roster))
+                continue;
+
+            var pick = people[i++ % people.Count];
+            task.AssigneeName = pick.Name;
+            task.AssigneeUserId = pick.UserId;
+            task.UpdatedAt = DateTime.UtcNow;
+            await store.UpdateEngTaskAsync(task);
+        }
+    }
+
+    private static bool MatchesStaff(string? assignee, IReadOnlyList<StaffAccessRecord> roster)
+    {
+        if (string.IsNullOrWhiteSpace(assignee)) return false;
+        var value = assignee.Trim();
+        return roster.Any(s =>
+            string.Equals(StaffLabel(s), value, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(s.Email, value, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(s.Email.Split('@')[0], value, StringComparison.OrdinalIgnoreCase)
+            || (!string.IsNullOrWhiteSpace(s.DisplayName)
+                && string.Equals(s.DisplayName, value, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static string StaffLabel(StaffAccessRecord staff) =>
+        string.IsNullOrWhiteSpace(staff.DisplayName) ? staff.Email : staff.DisplayName.Trim();
 
     private static async Task SeedGithubCacheAsync(ISupportStore store, string tenantId, DateTime now)
     {
