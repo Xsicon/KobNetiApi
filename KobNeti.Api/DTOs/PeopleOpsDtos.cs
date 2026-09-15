@@ -61,6 +61,7 @@ public class ApprovalRequestDTO
 public class DecideApprovalDTO
 {
     public bool Approve { get; set; }
+    public string? Comment { get; set; }
 }
 
 public class PayRateDTO

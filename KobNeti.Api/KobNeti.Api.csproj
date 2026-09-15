@@ -12,6 +12,7 @@
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.18" />
     <PackageReference Include="postgrest-csharp" Version="3.5.1" />
     <PackageReference Include="Postmark" Version="5.2.0" />
+    <PackageReference Include="QuestPDF" Version="2025.7.4" />
     <PackageReference Include="supabase-csharp" Version="0.16.2" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="7.3.1" />
   </ItemGroup>

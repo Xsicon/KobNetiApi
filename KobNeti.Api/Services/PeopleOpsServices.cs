@@ -1,8 +1,10 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using KobNeti.Api.Data;
 using KobNeti.Api.DTOs;
 using KobNeti.Api.Shared;
+using KobNeti.Api.Staff;
 
 namespace KobNeti.Api.Services;
 
@@ -29,7 +31,9 @@ public interface IPayrollService
     Task<Response<PayPeriodDTO>> CreatePeriodAsync(string tenantId, CreatePayPeriodDTO request);
     Task<Response<PayPeriodDTO>> CalculateAsync(string tenantId, Guid periodId);
     Task<Response<PayPeriodDTO>> SubmitForApprovalAsync(string tenantId, Guid periodId, Guid? userId, string userName);
+    Task<Response<PayPeriodDTO>> FinalizeAsync(string tenantId, Guid periodId);
     Task<Response<string>> ExportCsvAsync(string tenantId, Guid periodId);
+    Task<Response<byte[]>> ExportPdfAsync(string tenantId, Guid periodId, string companyName);
 }
 
 public class TimeTrackingService : ITimeTrackingService
@@ -243,6 +247,8 @@ public class ApprovalService : IApprovalService
             return Response<ApprovalRequestDTO>.Fail("Approval already decided");
 
         var now = DateTime.UtcNow;
+        if (!request.Approve && !string.IsNullOrWhiteSpace(request.Comment))
+            approval.PayloadJson = MergePayloadComment(approval.PayloadJson, request.Comment.Trim());
         approval.Status = request.Approve ? ApprovalStatus.Approved : ApprovalStatus.Rejected;
         approval.ApproverUserId = approverId;
         approval.ApproverName = approverName;
@@ -312,21 +318,39 @@ public class ApprovalService : IApprovalService
         period.UpdatedAt = DateTime.UtcNow;
         await _store.UpdatePayPeriodAsync(period);
     }
+
+    private static string MergePayloadComment(string payloadJson, string comment)
+    {
+        try
+        {
+            var node = JsonNode.Parse(string.IsNullOrWhiteSpace(payloadJson) ? "{}" : payloadJson) as JsonObject
+                       ?? new JsonObject();
+            node["comment"] = comment;
+            return node.ToJsonString();
+        }
+        catch
+        {
+            return payloadJson;
+        }
+    }
 }
 
 public class PayrollService : IPayrollService
 {
     private readonly ISupportStore _store;
     private readonly IAuditService _audit;
+    private readonly IStaffDirectory _staff;
 
-    public PayrollService(ISupportStore store, IAuditService audit)
+    public PayrollService(ISupportStore store, IAuditService audit, IStaffDirectory staff)
     {
         _store = store;
         _audit = audit;
+        _staff = staff;
     }
 
     public async Task<Response<List<PayRateDTO>>> ListRatesAsync(string tenantId)
     {
+        await PeopleOpsSampleData.EnsureSeededAsync(_store, this, tenantId, _staff);
         var rates = await _store.ListPayRatesAsync(tenantId);
         return Response<List<PayRateDTO>>.SuccessResponse(rates.Select(MapRate).ToList(), "Rates loaded");
     }
@@ -358,6 +382,7 @@ public class PayrollService : IPayrollService
 
     public async Task<Response<List<PayPeriodDTO>>> ListPeriodsAsync(string tenantId)
     {
+        await PeopleOpsSampleData.EnsureSeededAsync(_store, this, tenantId, _staff);
         var periods = await _store.ListPayPeriodsAsync(tenantId);
         return Response<List<PayPeriodDTO>>.SuccessResponse(periods.Select(MapPeriod).ToList(), "Pay periods loaded");
     }
@@ -466,6 +491,24 @@ public class PayrollService : IPayrollService
         return Response<PayPeriodDTO>.SuccessResponse(MapPeriod(period), "Payroll submitted for approval");
     }
 
+    public async Task<Response<PayPeriodDTO>> FinalizeAsync(string tenantId, Guid periodId)
+    {
+        var period = await _store.GetPayPeriodAsync(tenantId, periodId);
+        if (period is null)
+            return Response<PayPeriodDTO>.Fail("Pay period not found");
+        if (period.Status == PayPeriodStatus.Exported)
+            return Response<PayPeriodDTO>.SuccessResponse(MapPeriod(period), "Payroll already finalized");
+        if (period.Status != PayPeriodStatus.Approved)
+            return Response<PayPeriodDTO>.Fail("Approve payroll before finalizing");
+
+        period.Status = PayPeriodStatus.Exported;
+        period.UpdatedAt = DateTime.UtcNow;
+        await _store.UpdatePayPeriodAsync(period);
+        await _audit.WriteAsync(tenantId, AuditActions.PayrollExport, "pay_period", period.Id.ToString(),
+            null, null, null, new { status = period.Status, finalized = true });
+        return Response<PayPeriodDTO>.SuccessResponse(MapPeriod(period), "Payroll finalized");
+    }
+
     public async Task<Response<string>> ExportCsvAsync(string tenantId, Guid periodId)
     {
         var period = await _store.GetPayPeriodAsync(tenantId, periodId);
@@ -489,19 +532,68 @@ public class PayrollService : IPayrollService
                 Csv(period.Label)));
         }
 
-        period.Status = PayPeriodStatus.Exported;
-        period.UpdatedAt = DateTime.UtcNow;
-        await _store.UpdatePayPeriodAsync(period);
         await _audit.WriteAsync(tenantId, AuditActions.PayrollExport, "pay_period", period.Id.ToString(),
-            null, null, null, new { status = period.Status });
+            null, null, null, new { status = period.Status, exported = true });
         return Response<string>.SuccessResponse(sb.ToString(), "CSV export");
     }
 
+    public async Task<Response<byte[]>> ExportPdfAsync(string tenantId, Guid periodId, string companyName)
+    {
+        var period = await _store.GetPayPeriodAsync(tenantId, periodId);
+        if (period is null)
+            return Response<byte[]>.Fail("Pay period not found");
+        if (period.Status is not (PayPeriodStatus.Approved or PayPeriodStatus.Exported))
+            return Response<byte[]>.Fail("Export requires an approved payroll run");
+
+        var lines = DeserializeLines(period.LinesJson);
+        var roster = await _staff.ListAsync();
+        var statement = new PayrollStatementModel
+        {
+            CompanyName = string.IsNullOrWhiteSpace(companyName) ? tenantId : companyName.Trim(),
+            PeriodLabel = string.IsNullOrWhiteSpace(period.Label)
+                ? $"{period.StartsOn:MMM d} – {period.EndsOn:MMM d, yyyy}"
+                : period.Label,
+            StartsOn = period.StartsOn,
+            EndsOn = period.EndsOn,
+            GeneratedAt = DateTime.UtcNow,
+            Status = period.Status,
+            Currency = string.IsNullOrWhiteSpace(period.Currency) ? "USD" : period.Currency,
+            PeriodId = period.Id,
+            Lines = lines.Select(line =>
+            {
+                var person = roster.FirstOrDefault(s =>
+                    (line.UserId.HasValue && (s.Id == line.UserId || s.UserId == line.UserId))
+                    || string.Equals(s.DisplayName, line.UserName, StringComparison.OrdinalIgnoreCase));
+                return new PayrollStatementLine
+                {
+                    Name = string.IsNullOrWhiteSpace(line.UserName) ? "Unknown" : line.UserName,
+                    Role = TitleRole(person is null
+                        ? "support"
+                        : StaffRoles.Primary(person.Roles.Count > 0 ? person.Roles : [person.Role])),
+                    Email = person?.Email ?? "",
+                    Hours = Math.Round(line.Minutes / 60m, 1),
+                    Rate = line.HourlyRate,
+                    Amount = line.Amount
+                };
+            }).ToList()
+        };
+
+        var pdf = PayrollStatementPdf.Build(statement);
+        await _audit.WriteAsync(tenantId, AuditActions.PayrollExport, "pay_period", period.Id.ToString(),
+            null, null, null, new { status = period.Status, format = "pdf" });
+        return Response<byte[]>.SuccessResponse(pdf, "PDF export");
+    }
+
+    private static string TitleRole(string role) =>
+        string.IsNullOrWhiteSpace(role)
+            ? "Support"
+            : char.ToUpperInvariant(role[0]) + role[1..].ToLowerInvariant();
+
     private static (decimal HourlyRate, string Currency) ResolveRate(List<PayRateEntity> rates, Guid? userId)
     {
-        var byUser = rates.FirstOrDefault(r => userId.HasValue && r.UserId == userId);
-        if (byUser is not null)
-            return (byUser.HourlyRate, byUser.Currency);
+        var byPerson = rates.FirstOrDefault(r => userId.HasValue && (r.UserId == userId || r.StaffId == userId));
+        if (byPerson is not null)
+            return (byPerson.HourlyRate, byPerson.Currency);
         var fallback = rates.FirstOrDefault(r => r.UserId is null && r.StaffId is null && !string.IsNullOrWhiteSpace(r.Role))
                        ?? rates.FirstOrDefault();
         return fallback is null ? (0m, "USD") : (fallback.HourlyRate, fallback.Currency);

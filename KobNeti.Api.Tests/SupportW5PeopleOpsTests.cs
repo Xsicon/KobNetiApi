@@ -94,6 +94,13 @@ public class SupportW5PeopleOpsTests : IClassFixture<SupportApiFactory>
         var csv = await export.Content.ReadAsStringAsync();
         Assert.Contains("user_name", csv);
         Assert.Contains("minutes", csv);
+
+        var pdfRes = await agent.GetAsync($"api/Payroll/periods/{period.Id}/export.pdf");
+        Assert.Equal(HttpStatusCode.OK, pdfRes.StatusCode);
+        Assert.Equal("application/pdf", pdfRes.Content.Headers.ContentType?.MediaType);
+        var pdf = await pdfRes.Content.ReadAsByteArrayAsync();
+        Assert.True(pdf.Length > 200);
+        Assert.Equal("%PDF"u8.ToArray(), pdf.Take(4).ToArray());
     }
 
     [Fact]

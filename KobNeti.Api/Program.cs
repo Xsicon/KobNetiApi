@@ -9,7 +9,10 @@ using KobNeti.Api.Staff;
 using KobNeti.Api.Storage;
 using KobNeti.Api.Teams;
 using KobNeti.Api.Tenancy;
+using QuestPDF.Infrastructure;
 using Supabase;
+
+QuestPDF.Settings.License = LicenseType.Community;
 
 var builder = WebApplication.CreateBuilder(args);
 

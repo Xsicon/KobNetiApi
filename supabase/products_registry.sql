@@ -41,7 +41,8 @@ insert into sominnercore.products
 values
   ('muuqwear', 'MuuqWear', 'saas_app', 'active', 'standard', 'pk_muuqwear_dev_public', true),
   ('salguri',  'Salguri',  'saas_app', 'active', 'standard', 'pk_salguri_dev_public',  true),
-  ('gaarx',    'GaarX',    'saas_app', 'active', 'standard', 'pk_gaarx_dev_public',    true)
+  ('gaarx',    'GaarX',    'saas_app', 'active', 'standard', 'pk_gaarx_dev_public',    true),
+  ('kobneti',  'KobNeti',  'internal_tool', 'active', 'enterprise', 'pk_kobneti_dev_public', true)
 on conflict (slug) do update set
   display_name = excluded.display_name,
   public_key = excluded.public_key,

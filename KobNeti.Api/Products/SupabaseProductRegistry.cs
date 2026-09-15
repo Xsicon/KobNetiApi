@@ -61,7 +61,7 @@ public class SupabaseProductRegistry : IProductRegistry
             if (rows.Count == 0)
                 return await _configFallback.ListEnabledAsync(ct);
 
-            return OverlayConfigSecrets(rows);
+            return await MergeConfigTenantsAsync(OverlayConfigSecrets(rows).ToList(), ct);
         }
         catch (Exception ex)
         {
@@ -196,6 +196,19 @@ public class SupabaseProductRegistry : IProductRegistry
             _logger.LogWarning(ex, "Product registry UpdateUpstreamApiBaseUrl failed for {Slug}", slug);
             return await _configFallback.UpdateUpstreamApiBaseUrlAsync(slug, upstreamApiBaseUrl, ct);
         }
+    }
+
+    private async Task<IReadOnlyList<ProductRecord>> MergeConfigTenantsAsync(
+        List<ProductRecord> rows, CancellationToken ct)
+    {
+        var extras = await _configFallback.ListEnabledAsync(ct);
+        foreach (var extra in extras)
+        {
+            if (rows.Any(r => string.Equals(r.Slug, extra.Slug, StringComparison.OrdinalIgnoreCase)))
+                continue;
+            rows.Add(extra);
+        }
+        return rows;
     }
 
     private IReadOnlyList<ProductRecord> OverlayConfigSecrets(List<ProductRecord> rows)

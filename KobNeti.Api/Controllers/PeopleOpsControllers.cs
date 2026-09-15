@@ -131,6 +131,11 @@ public class PayrollController : ApiControllerBase
             AdminRoleClaims.GetUserId(User),
             AdminRoleClaims.GetDisplayName(User)));
 
+    [HttpPost("periods/{id:guid}/finalize")]
+    [Authorize(Policy = AdminAuthorizationPolicies.PlatformAdmin)]
+    public async Task<ActionResult<Response<PayPeriodDTO>>> Finalize(Guid id) =>
+        HandleResponse(await _payroll.FinalizeAsync(RequireTenantId(_tenant), id));
+
     [HttpGet("periods/{id:guid}/export.csv")]
     public async Task<IActionResult> ExportCsv(Guid id)
     {
@@ -138,5 +143,18 @@ public class PayrollController : ApiControllerBase
         if (!result.Success)
             return BadRequest(result);
         return File(System.Text.Encoding.UTF8.GetBytes(result.Data ?? ""), "text/csv", $"payroll-{id:N}.csv");
+    }
+
+    [HttpGet("periods/{id:guid}/export.pdf")]
+    public async Task<IActionResult> ExportPdf(Guid id)
+    {
+        var tenant = _tenant.Current;
+        var result = await _payroll.ExportPdfAsync(
+            RequireTenantId(_tenant),
+            id,
+            string.IsNullOrWhiteSpace(tenant?.DisplayName) ? tenant?.TenantId ?? "KobNeti" : tenant.DisplayName);
+        if (!result.Success)
+            return BadRequest(result);
+        return File(result.Data ?? [], "application/pdf", $"Payroll_Summary_Statement_{id:N}.pdf");
     }
 }

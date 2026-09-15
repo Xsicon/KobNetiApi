@@ -400,6 +400,7 @@ public class StaffController : ApiControllerBase
         return new StaffMemberDTO
         {
             Id = s.Id,
+            UserId = s.UserId,
             Email = s.Email,
             DisplayName = s.DisplayName,
             Role = StaffRoles.Primary(roles),
