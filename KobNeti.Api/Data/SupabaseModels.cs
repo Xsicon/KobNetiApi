@@ -253,6 +253,7 @@ public class SbCalendarEvent : BaseModel
     [Column("event_type")] public string EventType { get; set; } = "milestone";
     [Column("starts_at")] public DateTime StartsAt { get; set; }
     [Column("ends_at")] public DateTime? EndsAt { get; set; }
+    [Column("location")] public string? Location { get; set; }
     [Column("source_entity_type")] public string? SourceEntityType { get; set; }
     [Column("source_entity_id")] public Guid? SourceEntityId { get; set; }
     [Column("created_at")] public DateTime CreatedAt { get; set; }
@@ -411,6 +412,7 @@ public class SbOpsFile : BaseModel
     [Column("created_by")] public Guid? CreatedBy { get; set; }
     [Column("created_by_name")] public string? CreatedByName { get; set; }
     [Column("created_at")] public DateTime CreatedAt { get; set; }
+    [Column("access")] public string Access { get; set; } = "restricted";
 }
 
 [Table("ops_integrations")]
@@ -449,6 +451,7 @@ public class SbPlatformHelp : BaseModel
     [Column("category")] public string Category { get; set; } = "general";
     [Column("status")] public string Status { get; set; } = "published";
     [Column("sort_order")] public int SortOrder { get; set; }
+    [Column("video_url")] public string? VideoUrl { get; set; }
     [Column("created_at")] public DateTime CreatedAt { get; set; }
     [Column("updated_at")] public DateTime UpdatedAt { get; set; }
 }
@@ -474,6 +477,7 @@ public class SbImChannel : BaseModel
     [Column("tenant_id")] public string TenantId { get; set; } = string.Empty;
     [Column("name")] public string Name { get; set; } = string.Empty;
     [Column("channel_type")] public string ChannelType { get; set; } = "channel";
+    [Column("topic")] public string Topic { get; set; } = string.Empty;
     [Column("created_by")] public Guid? CreatedBy { get; set; }
     [Column("created_at")] public DateTime CreatedAt { get; set; }
 }
@@ -484,6 +488,7 @@ public class SbImMessage : BaseModel
     [PrimaryKey("id", false)] public Guid Id { get; set; }
     [Column("tenant_id")] public string TenantId { get; set; } = string.Empty;
     [Column("channel_id")] public Guid ChannelId { get; set; }
+    [Column("parent_message_id")] public Guid? ParentMessageId { get; set; }
     [Column("sender_user_id")] public Guid? SenderUserId { get; set; }
     [Column("sender_name")] public string SenderName { get; set; } = string.Empty;
     [Column("body")] public string Body { get; set; } = string.Empty;

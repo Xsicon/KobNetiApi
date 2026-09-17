@@ -48,6 +48,8 @@ public class PlatformHelpArticleDTO
     public string Category { get; set; } = "general";
     public string Status { get; set; } = "published";
     public int SortOrder { get; set; }
+    public string? VideoUrl { get; set; }
+    public DateTime UpdatedAt { get; set; }
 }
 
 public class SavePlatformHelpDTO
@@ -58,6 +60,13 @@ public class SavePlatformHelpDTO
     public string Category { get; set; } = "general";
     public string Status { get; set; } = "published";
     public int SortOrder { get; set; }
+    public string? VideoUrl { get; set; }
+}
+
+public class PlatformHelpVideoDTO
+{
+    public string Url { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
 }
 
 public class ImChannelDTO
@@ -65,19 +74,33 @@ public class ImChannelDTO
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public string ChannelType { get; set; } = "channel";
+    public string Topic { get; set; } = string.Empty;
+    public int MemberCount { get; set; }
     public DateTime CreatedAt { get; set; }
+    public string? LastMessageBody { get; set; }
+    public DateTime? LastMessageAt { get; set; }
+    public string? LastSenderName { get; set; }
+    public Guid? LastSenderUserId { get; set; }
 }
 
 public class CreateImChannelDTO
 {
     public string Name { get; set; } = string.Empty;
     public string ChannelType { get; set; } = "channel";
+    public string? Topic { get; set; }
+}
+
+public class OpenImDmDTO
+{
+    public Guid UserId { get; set; }
+    public string? DisplayName { get; set; }
 }
 
 public class ImMessageDTO
 {
     public Guid Id { get; set; }
     public Guid ChannelId { get; set; }
+    public Guid? ParentMessageId { get; set; }
     public Guid? SenderUserId { get; set; }
     public string SenderName { get; set; } = string.Empty;
     public string Body { get; set; } = string.Empty;
@@ -87,6 +110,7 @@ public class ImMessageDTO
 public class SendImMessageDTO
 {
     public string Body { get; set; } = string.Empty;
+    public Guid? ParentMessageId { get; set; }
 }
 
 public class AssetDTO
@@ -100,6 +124,7 @@ public class AssetDTO
     public string? AssignedUserName { get; set; }
     public DateOnly? RenewalDate { get; set; }
     public string? Notes { get; set; }
+    public DateTime CreatedAt { get; set; }
 }
 
 public class SaveAssetDTO

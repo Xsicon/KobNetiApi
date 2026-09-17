@@ -38,7 +38,7 @@ public class ProductsController : ApiControllerBase
     [HttpGet]
     public async Task<ActionResult<Response<List<ProductDTO>>>> List(CancellationToken ct)
     {
-        var products = await _registry.ListEnabledAsync(ct);
+        var products = await _registry.ListAllAsync(ct);
         var list = new List<ProductDTO>();
         foreach (var p in products.Where(p => AdminRoleClaims.CanAccessProduct(User, p.Slug)))
         {
@@ -47,6 +47,85 @@ public class ProductsController : ApiControllerBase
         }
 
         return Ok(Response<List<ProductDTO>>.SuccessResponse(list, "Products loaded"));
+    }
+
+    [HttpPost]
+    [Authorize(Policy = AdminAuthorizationPolicies.PlatformAdmin)]
+    public async Task<ActionResult<Response<ProductDTO>>> Create(
+        [FromBody] CreateProductDTO request, CancellationToken ct)
+    {
+        var name = (request.DisplayName ?? "").Trim();
+        var slug = ProductCatalog.NormalizeSlug(request.Slug);
+        var type = ProductCatalog.NormalizeType(request.ProductType);
+        var tier = ProductCatalog.NormalizeTier(request.SupportTier);
+        if (string.IsNullOrWhiteSpace(name))
+            return BadRequest(Response<ProductDTO>.Fail("Display name is required."));
+        if (!ProductCatalog.IsValidSlug(slug))
+            return BadRequest(Response<ProductDTO>.Fail("Slug must be lowercase letters, numbers, and hyphens."));
+        if (string.IsNullOrWhiteSpace(type))
+            return BadRequest(Response<ProductDTO>.Fail("Product type must be public_website, saas_app, mobile_app, or internal_tool."));
+        if (string.IsNullOrWhiteSpace(tier))
+            return BadRequest(Response<ProductDTO>.Fail("Support tier must be standard, priority, or enterprise."));
+
+        var existing = await _registry.ListAllAsync(ct);
+        if (existing.Any(p => string.Equals(p.Slug, slug, StringComparison.OrdinalIgnoreCase)))
+            return Conflict(Response<ProductDTO>.Fail($"Product slug '{slug}' already exists."));
+
+        var created = await _registry.CreateAsync(new ProductRecord
+        {
+            Slug = slug,
+            DisplayName = name,
+            ProductType = type,
+            Status = "active",
+            SupportTier = tier
+        }, ct);
+        if (created is null)
+            return BadRequest(Response<ProductDTO>.Fail("Failed to create product."));
+
+        if (_tenants is ProductTenantResolver resolver)
+            resolver.InvalidateCache();
+
+        return Ok(Response<ProductDTO>.SuccessResponse(await ToDtoAsync(created, ct), "Product created"));
+    }
+
+    [HttpPatch("{slug}")]
+    [Authorize(Policy = AdminAuthorizationPolicies.PlatformAdmin)]
+    public async Task<ActionResult<Response<ProductDTO>>> UpdateCatalog(
+        string slug, [FromBody] UpdateProductCatalogDTO request, CancellationToken ct)
+    {
+        var patch = new ProductRecord();
+        if (!string.IsNullOrWhiteSpace(request.DisplayName))
+            patch.DisplayName = request.DisplayName.Trim();
+        if (!string.IsNullOrWhiteSpace(request.ProductType))
+        {
+            var type = ProductCatalog.NormalizeType(request.ProductType);
+            if (string.IsNullOrWhiteSpace(type))
+                return BadRequest(Response<ProductDTO>.Fail("Product type must be public_website, saas_app, mobile_app, or internal_tool."));
+            patch.ProductType = type;
+        }
+        if (!string.IsNullOrWhiteSpace(request.Status))
+        {
+            var status = ProductCatalog.NormalizeStatus(request.Status);
+            if (string.IsNullOrWhiteSpace(status))
+                return BadRequest(Response<ProductDTO>.Fail("Status must be active, beta, or deprecated."));
+            patch.Status = status;
+        }
+        if (!string.IsNullOrWhiteSpace(request.SupportTier))
+        {
+            var tier = ProductCatalog.NormalizeTier(request.SupportTier);
+            if (string.IsNullOrWhiteSpace(tier))
+                return BadRequest(Response<ProductDTO>.Fail("Support tier must be standard, priority, or enterprise."));
+            patch.SupportTier = tier;
+        }
+
+        var updated = await _registry.UpdateCatalogAsync(slug, patch, ct);
+        if (updated is null)
+            return NotFound(Response<ProductDTO>.Fail("Product not found"));
+
+        if (_tenants is ProductTenantResolver resolver)
+            resolver.InvalidateCache();
+
+        return Ok(Response<ProductDTO>.SuccessResponse(await ToDtoAsync(updated, ct), "Product updated"));
     }
 
     /// <summary>Rotate embed/public key for a product (W1.13). Platform admin only.</summary>
@@ -144,13 +223,7 @@ public class ProductsController : ApiControllerBase
         }
 
         return Ok(Response<List<ProductRepoDTO>>.SuccessResponse(
-            rows.Select(r => new ProductRepoDTO
-            {
-                Id = r.Id,
-                RepoKind = r.RepoKind,
-                Title = r.Title,
-                GithubRepoUrl = r.GithubRepoUrl
-            }).ToList(),
+            rows.Select(MapRepo).ToList(),
             "Linked repos loaded"));
     }
 
@@ -184,13 +257,7 @@ public class ProductsController : ApiControllerBase
         if (kind == ProductRepoKinds.WebApp)
             await _registry.UpdateGithubRepoUrlAsync(slug, saved.GithubRepoUrl, ct);
 
-        return Ok(Response<ProductRepoDTO>.SuccessResponse(new ProductRepoDTO
-        {
-            Id = saved.Id,
-            RepoKind = saved.RepoKind,
-            Title = saved.Title,
-            GithubRepoUrl = saved.GithubRepoUrl
-        }, "Linked repo saved"));
+        return Ok(Response<ProductRepoDTO>.SuccessResponse(MapRepo(saved), "Linked repo saved"));
     }
 
     [HttpDelete("{slug}/repos/{repoKind}")]
@@ -267,13 +334,8 @@ public class ProductsController : ApiControllerBase
             UpstreamApiBaseUrl = p.UpstreamApiBaseUrl,
             GithubRepoUrl = p.GithubRepoUrl,
             Enabled = p.Enabled,
-            LinkedRepos = linked.Select(r => new ProductRepoDTO
-            {
-                Id = r.Id,
-                RepoKind = r.RepoKind,
-                Title = r.Title,
-                GithubRepoUrl = r.GithubRepoUrl
-            }).ToList()
+            CreatedAt = p.CreatedAt,
+            LinkedRepos = linked.Select(MapRepo).ToList()
         };
 
         if (dto.LinkedRepos.Count == 0 && !string.IsNullOrWhiteSpace(p.GithubRepoUrl))
@@ -282,10 +344,22 @@ public class ProductsController : ApiControllerBase
             {
                 RepoKind = ProductRepoKinds.WebApp,
                 Title = ProductRepoKinds.DefaultTitle(p.DisplayName, ProductRepoKinds.WebApp),
-                GithubRepoUrl = p.GithubRepoUrl
+                GithubRepoUrl = p.GithubRepoUrl,
+                CreatedAt = p.CreatedAt,
+                UpdatedAt = p.UpdatedAt
             });
         }
 
         return dto;
     }
+
+    private static ProductRepoDTO MapRepo(ProductRepoRecord r) => new()
+    {
+        Id = r.Id,
+        RepoKind = r.RepoKind,
+        Title = r.Title,
+        GithubRepoUrl = r.GithubRepoUrl,
+        CreatedAt = r.CreatedAt,
+        UpdatedAt = r.UpdatedAt
+    };
 }

@@ -217,7 +217,9 @@ public class GithubReadService : IGithubReadService
         Id = r.Id,
         RepoKind = r.RepoKind,
         Title = r.Title,
-        GithubRepoUrl = r.GithubRepoUrl
+        GithubRepoUrl = r.GithubRepoUrl,
+        CreatedAt = r.CreatedAt,
+        UpdatedAt = r.UpdatedAt
     };
 
     public static bool TryParseRepo(string url, out string owner, out string repo)

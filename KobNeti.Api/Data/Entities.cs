@@ -235,6 +235,7 @@ public class CalendarEventEntity
     public string EventType { get; set; } = "milestone";
     public DateTime StartsAt { get; set; }
     public DateTime? EndsAt { get; set; }
+    public string? Location { get; set; }
     public string? SourceEntityType { get; set; }
     public Guid? SourceEntityId { get; set; }
     public DateTime CreatedAt { get; set; }
@@ -372,6 +373,7 @@ public class OpsFileEntity
     public Guid? CreatedBy { get; set; }
     public string? CreatedByName { get; set; }
     public DateTime CreatedAt { get; set; }
+    public string Access { get; set; } = "restricted";
 }
 
 public class IntegrationEntity
@@ -407,6 +409,7 @@ public class PlatformHelpArticleEntity
     public string Category { get; set; } = "general";
     public string Status { get; set; } = "published";
     public int SortOrder { get; set; }
+    public string? VideoUrl { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }
@@ -430,6 +433,7 @@ public class ImChannelEntity
     public string TenantId { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string ChannelType { get; set; } = "channel";
+    public string Topic { get; set; } = string.Empty;
     public Guid? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; }
 }
@@ -439,6 +443,7 @@ public class ImMessageEntity
     public Guid Id { get; set; }
     public string TenantId { get; set; } = string.Empty;
     public Guid ChannelId { get; set; }
+    public Guid? ParentMessageId { get; set; }
     public Guid? SenderUserId { get; set; }
     public string SenderName { get; set; } = string.Empty;
     public string Body { get; set; } = string.Empty;

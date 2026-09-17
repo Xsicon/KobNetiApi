@@ -98,6 +98,7 @@ public class CalendarEventDTO
     public string EventType { get; set; } = "milestone";
     public DateTime StartsAt { get; set; }
     public DateTime? EndsAt { get; set; }
+    public string? Location { get; set; }
     public string? SourceEntityType { get; set; }
     public Guid? SourceEntityId { get; set; }
 }

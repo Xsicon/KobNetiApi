@@ -119,7 +119,9 @@ public interface ISupportStore
     Task UpsertNotificationPrefsAsync(NotificationPrefsEntity prefs);
 
     Task InsertOpsFileAsync(OpsFileEntity file);
+    Task UpdateOpsFileAsync(OpsFileEntity file);
     Task DeleteOpsFileAsync(string tenantId, Guid id);
+    Task<OpsFileEntity?> GetOpsFileAsync(string tenantId, Guid id);
     Task<List<OpsFileEntity>> ListOpsFilesAsync(string tenantId, string? folderPath);
 
     Task<IntegrationEntity> UpsertIntegrationAsync(IntegrationEntity integration);
@@ -140,9 +142,11 @@ public interface ISupportStore
 
     Task<ImChannelEntity> InsertImChannelAsync(ImChannelEntity channel);
     Task<ImChannelEntity?> GetImChannelAsync(string tenantId, Guid id);
+    Task<ImChannelEntity?> GetImChannelByNameAsync(string tenantId, string name, string channelType);
     Task<List<ImChannelEntity>> ListImChannelsAsync(string tenantId);
     Task InsertImMessageAsync(ImMessageEntity message);
     Task<List<ImMessageEntity>> ListImMessagesAsync(string tenantId, Guid channelId);
+    Task<List<ImMessageEntity>> ListImMessagesForTenantAsync(string tenantId);
 
     Task InsertAssetAsync(AssetEntity asset);
     Task UpdateAssetAsync(AssetEntity asset);

@@ -1,4 +1,7 @@
 using System.Globalization;
+using System.IO;
+using System.Net.Http;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using KobNeti.Api.Auth;
@@ -6,6 +9,8 @@ using KobNeti.Api.Data;
 using KobNeti.Api.DTOs;
 using KobNeti.Api.Products;
 using KobNeti.Api.Shared;
+using KobNeti.Api.Staff;
+using KobNeti.Api.Storage;
 using System.Security.Claims;
 
 namespace KobNeti.Api.Services;
@@ -216,13 +221,29 @@ public interface IPlatformHelpService
     Task<Response<List<PlatformHelpArticleDTO>>> ListAsync(bool publishedOnly);
     Task<Response<PlatformHelpArticleDTO>> GetBySlugAsync(string slug);
     Task<Response<PlatformHelpArticleDTO>> UpsertAsync(SavePlatformHelpDTO request);
+    Task<Response<PlatformHelpVideoDTO>> UploadVideoAsync(string fileName, string contentType, Stream content, long length);
 }
 
 public class PlatformHelpService : IPlatformHelpService
 {
-    private readonly ISupportStore _store;
+    private const long MaxVideoBytes = 50 * 1024 * 1024;
+    private static readonly HashSet<string> VideoExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".mp4", ".webm", ".mov", ".m4v"
+    };
+    private static readonly HashSet<string> VideoContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "video/mp4", "video/webm", "video/quicktime", "video/x-m4v", "video/x-msvideo"
+    };
 
-    public PlatformHelpService(ISupportStore store) => _store = store;
+    private readonly ISupportStore _store;
+    private readonly ISupabaseStorageUploader _storage;
+
+    public PlatformHelpService(ISupportStore store, ISupabaseStorageUploader storage)
+    {
+        _store = store;
+        _storage = storage;
+    }
 
     public async Task<Response<List<PlatformHelpArticleDTO>>> ListAsync(bool publishedOnly)
     {
@@ -245,6 +266,7 @@ public class PlatformHelpService : IPlatformHelpService
 
         var now = DateTime.UtcNow;
         var existing = await _store.GetPlatformHelpBySlugAsync(request.Slug.Trim());
+        var videoUrl = string.IsNullOrWhiteSpace(request.VideoUrl) ? null : request.VideoUrl.Trim();
         var entity = new PlatformHelpArticleEntity
         {
             Id = existing?.Id ?? Guid.NewGuid(),
@@ -254,11 +276,48 @@ public class PlatformHelpService : IPlatformHelpService
             Category = string.IsNullOrWhiteSpace(request.Category) ? "general" : request.Category.Trim(),
             Status = string.IsNullOrWhiteSpace(request.Status) ? "published" : request.Status.Trim(),
             SortOrder = request.SortOrder,
+            VideoUrl = videoUrl,
             CreatedAt = existing?.CreatedAt ?? now,
             UpdatedAt = now
         };
         var saved = await _store.UpsertPlatformHelpAsync(entity);
         return Response<PlatformHelpArticleDTO>.SuccessResponse(Map(saved), "Article saved");
+    }
+
+    public async Task<Response<PlatformHelpVideoDTO>> UploadVideoAsync(
+        string fileName, string contentType, Stream content, long length)
+    {
+        if (length <= 0)
+            return Response<PlatformHelpVideoDTO>.Fail("Video file is empty.");
+        if (length > MaxVideoBytes)
+            return Response<PlatformHelpVideoDTO>.Fail("Video must be 50 MB or less.");
+
+        var safeName = Path.GetFileName(fileName.Trim());
+        var ext = Path.GetExtension(safeName);
+        if (string.IsNullOrWhiteSpace(ext) || !VideoExtensions.Contains(ext))
+            return Response<PlatformHelpVideoDTO>.Fail("Use an MP4, WebM, or MOV video file.");
+        if (!string.IsNullOrWhiteSpace(contentType)
+            && !contentType.StartsWith("video/", StringComparison.OrdinalIgnoreCase)
+            && !VideoContentTypes.Contains(contentType)
+            && !string.Equals(contentType, "application/octet-stream", StringComparison.OrdinalIgnoreCase))
+            return Response<PlatformHelpVideoDTO>.Fail("File is not a supported video type.");
+
+        if (!_storage.IsConfigured)
+            return Response<PlatformHelpVideoDTO>.Fail("Video storage is not configured. Add Supabase ServiceRoleKey and create the ops-files bucket.");
+
+        var objectKey = $"platform-help/videos/{Guid.NewGuid():N}{ext.ToLowerInvariant()}";
+        var mime = string.IsNullOrWhiteSpace(contentType) || contentType == "application/octet-stream"
+            ? (ext.Equals(".webm", StringComparison.OrdinalIgnoreCase) ? "video/webm" : "video/mp4")
+            : contentType;
+        var upload = await _storage.UploadAsync(objectKey, content, mime);
+        if (!upload.Ok || string.IsNullOrWhiteSpace(upload.PublicUrl))
+            return Response<PlatformHelpVideoDTO>.Fail(upload.Error ?? "Video upload failed.");
+
+        return Response<PlatformHelpVideoDTO>.SuccessResponse(new PlatformHelpVideoDTO
+        {
+            Url = upload.PublicUrl,
+            FileName = safeName
+        }, "Video uploaded");
     }
 
     private static PlatformHelpArticleDTO Map(PlatformHelpArticleEntity a) => new()
@@ -269,7 +328,9 @@ public class PlatformHelpService : IPlatformHelpService
         Body = a.Body,
         Category = a.Category,
         Status = a.Status,
-        SortOrder = a.SortOrder
+        SortOrder = a.SortOrder,
+        VideoUrl = a.VideoUrl,
+        UpdatedAt = a.UpdatedAt
     };
 }
 
@@ -277,6 +338,7 @@ public interface IInternalChatService
 {
     Task<Response<List<ImChannelDTO>>> ListChannelsAsync(string tenantId);
     Task<Response<ImChannelDTO>> CreateChannelAsync(string tenantId, CreateImChannelDTO request, Guid? userId);
+    Task<Response<ImChannelDTO>> OpenDmAsync(string tenantId, OpenImDmDTO request, Guid? userId, string? senderName);
     Task<Response<List<ImMessageDTO>>> ListMessagesAsync(string tenantId, Guid channelId);
     Task<Response<ImMessageDTO>> SendAsync(string tenantId, Guid channelId, SendImMessageDTO request, Guid? userId, string? senderName);
 }
@@ -285,17 +347,70 @@ public class InternalChatService : IInternalChatService
 {
     private readonly ISupportStore _store;
     private readonly IAppNotificationService _notifications;
+    private readonly IStaffDirectory _staff;
 
-    public InternalChatService(ISupportStore store, IAppNotificationService notifications)
+    public InternalChatService(ISupportStore store, IAppNotificationService notifications, IStaffDirectory staff)
     {
         _store = store;
         _notifications = notifications;
+        _staff = staff;
     }
 
     public async Task<Response<List<ImChannelDTO>>> ListChannelsAsync(string tenantId)
     {
-        var items = await _store.ListImChannelsAsync(tenantId);
-        return Response<List<ImChannelDTO>>.SuccessResponse(items.Select(MapChannel).ToList(), "Channels loaded");
+        List<ImChannelEntity> items;
+        try
+        {
+            items = await _store.ListImChannelsAsync(tenantId);
+        }
+        catch (Exception ex) when (IsUnavailable(ex))
+        {
+            return Response<List<ImChannelDTO>>.Fail("Could not load channels. Try again.");
+        }
+        if (!items.Any(c =>
+                string.Equals(c.ChannelType, "channel", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(c.Name, "general", StringComparison.OrdinalIgnoreCase)))
+        {
+            ImChannelEntity? general = null;
+            try
+            {
+                general = await _store.GetImChannelByNameAsync(tenantId, "general", "channel");
+                if (general is null)
+                {
+                    try
+                    {
+                        general = await CreateChannelCore(tenantId, "general", "channel", "Team-wide discussion", null);
+                    }
+                    catch
+                    {
+                        general = await _store.GetImChannelByNameAsync(tenantId, "general", "channel");
+                    }
+                }
+            }
+            catch (Exception ex) when (IsUnavailable(ex))
+            {
+                general = null;
+            }
+            if (general is not null && items.All(c => c.Id != general.Id))
+                items = [.. items, general];
+        }
+
+        var memberCount = (await _staff.ListAsync())
+            .Count(s => StaffStatuses.IsLoginAllowed(s.Status) && s.Active);
+        Dictionary<Guid, ImMessageEntity> lastByChannel;
+        try
+        {
+            lastByChannel = (await _store.ListImMessagesForTenantAsync(tenantId))
+                .GroupBy(m => m.ChannelId)
+                .ToDictionary(g => g.Key, g => g.OrderByDescending(m => m.CreatedAt).First());
+        }
+        catch (Exception ex) when (IsUnavailable(ex))
+        {
+            lastByChannel = [];
+        }
+        return Response<List<ImChannelDTO>>.SuccessResponse(
+            items.Select(c => MapChannel(c, memberCount, lastByChannel.GetValueOrDefault(c.Id))).ToList(),
+            "Channels loaded");
     }
 
     public async Task<Response<ImChannelDTO>> CreateChannelAsync(string tenantId, CreateImChannelDTO request, Guid? userId)
@@ -303,26 +418,52 @@ public class InternalChatService : IInternalChatService
         if (string.IsNullOrWhiteSpace(request.Name))
             return Response<ImChannelDTO>.Fail("Name is required");
         var type = string.Equals(request.ChannelType, "dm", StringComparison.OrdinalIgnoreCase) ? "dm" : "channel";
-        var channel = new ImChannelEntity
-        {
-            Id = Guid.NewGuid(),
-            TenantId = tenantId,
-            Name = request.Name.Trim(),
-            ChannelType = type,
-            CreatedBy = userId,
-            CreatedAt = DateTime.UtcNow
-        };
-        await _store.InsertImChannelAsync(channel);
-        return Response<ImChannelDTO>.SuccessResponse(MapChannel(channel), "Channel created");
+        var name = type == "dm" ? request.Name.Trim() : Slugify(request.Name);
+        if (string.IsNullOrWhiteSpace(name))
+            return Response<ImChannelDTO>.Fail("Name is required");
+
+        var existing = await _store.GetImChannelByNameAsync(tenantId, name, type);
+        if (existing is not null)
+            return Response<ImChannelDTO>.Fail($"Channel #{name} already exists.");
+
+        var channel = await CreateChannelCore(tenantId, name, type, request.Topic, userId);
+        var memberCount = (await _staff.ListAsync())
+            .Count(s => StaffStatuses.IsLoginAllowed(s.Status) && s.Active);
+        return Response<ImChannelDTO>.SuccessResponse(MapChannel(channel, memberCount), "Channel created");
+    }
+
+    public async Task<Response<ImChannelDTO>> OpenDmAsync(
+        string tenantId, OpenImDmDTO request, Guid? userId, string? senderName)
+    {
+        if (userId is null || userId == Guid.Empty)
+            return Response<ImChannelDTO>.Fail("Sign in again to start a direct message.");
+        if (request.UserId == Guid.Empty)
+            return Response<ImChannelDTO>.Fail("Choose a teammate.");
+        if (request.UserId == userId)
+            return Response<ImChannelDTO>.Fail("Pick another teammate for a direct message.");
+
+        var name = DmName(userId.Value, request.UserId);
+        var existing = await _store.GetImChannelByNameAsync(tenantId, name, "dm");
+        if (existing is not null)
+            return Response<ImChannelDTO>.SuccessResponse(MapChannel(existing, 2), "Direct message loaded");
+
+        var peer = string.IsNullOrWhiteSpace(request.DisplayName) ? "Teammate" : request.DisplayName.Trim();
+        var me = string.IsNullOrWhiteSpace(senderName) ? "You" : senderName.Trim();
+        var channel = await CreateChannelCore(tenantId, name, "dm", $"{me} / {peer}", userId);
+        return Response<ImChannelDTO>.SuccessResponse(MapChannel(channel, 2), "Direct message opened");
     }
 
     public async Task<Response<List<ImMessageDTO>>> ListMessagesAsync(string tenantId, Guid channelId)
     {
-        var channel = await _store.GetImChannelAsync(tenantId, channelId);
-        if (channel is null)
-            return Response<List<ImMessageDTO>>.Fail("Channel not found");
-        var items = await _store.ListImMessagesAsync(tenantId, channelId);
-        return Response<List<ImMessageDTO>>.SuccessResponse(items.Select(MapMessage).ToList(), "Messages loaded");
+        try
+        {
+            var items = await _store.ListImMessagesAsync(tenantId, channelId);
+            return Response<List<ImMessageDTO>>.SuccessResponse(items.Select(MapMessage).ToList(), "Messages loaded");
+        }
+        catch (Exception ex) when (IsUnavailable(ex))
+        {
+            return Response<List<ImMessageDTO>>.Fail("Could not load messages. Try again.");
+        }
     }
 
     public async Task<Response<ImMessageDTO>> SendAsync(
@@ -330,15 +471,31 @@ public class InternalChatService : IInternalChatService
     {
         if (string.IsNullOrWhiteSpace(request.Body))
             return Response<ImMessageDTO>.Fail("Message body is required");
-        var channel = await _store.GetImChannelAsync(tenantId, channelId);
+        ImChannelEntity? channel;
+        try
+        {
+            channel = await _store.GetImChannelAsync(tenantId, channelId);
+        }
+        catch (Exception ex) when (IsUnavailable(ex))
+        {
+            return Response<ImMessageDTO>.Fail("Could not send the message. Try again.");
+        }
         if (channel is null)
             return Response<ImMessageDTO>.Fail("Channel not found");
+
+        if (request.ParentMessageId is Guid parentId)
+        {
+            var thread = await _store.ListImMessagesAsync(tenantId, channelId);
+            if (thread.All(m => m.Id != parentId))
+                return Response<ImMessageDTO>.Fail("Parent message was not found.");
+        }
 
         var msg = new ImMessageEntity
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             ChannelId = channelId,
+            ParentMessageId = request.ParentMessageId,
             SenderUserId = userId,
             SenderName = string.IsNullOrWhiteSpace(senderName) ? "Agent" : senderName.Trim(),
             Body = request.Body.Trim(),
@@ -346,32 +503,81 @@ public class InternalChatService : IInternalChatService
         };
         await _store.InsertImMessageAsync(msg);
 
+        var title = string.Equals(channel.ChannelType, "dm", StringComparison.OrdinalIgnoreCase)
+            ? "New direct message"
+            : $"New message in #{channel.Name}";
         await _notifications.NotifyAsync(
             tenantId, "im",
-            $"New message in #{channel.Name}",
+            title,
             Truncate(msg.Body, 120),
             sourceType: "im_channel",
             sourceId: channel.Id.ToString(),
-            linkUrl: "/admin/support?tab=internal");
+            linkUrl: "/admin/internal");
 
         return Response<ImMessageDTO>.SuccessResponse(MapMessage(msg), "Message sent");
+    }
+
+    private async Task<ImChannelEntity> CreateChannelCore(
+        string tenantId, string name, string type, string? topic, Guid? userId)
+    {
+        var channel = new ImChannelEntity
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Name = name,
+            ChannelType = type,
+            Topic = (topic ?? "").Trim(),
+            CreatedBy = userId,
+            CreatedAt = DateTime.UtcNow
+        };
+        await _store.InsertImChannelAsync(channel);
+        return channel;
+    }
+
+    private static string DmName(Guid a, Guid b)
+    {
+        var left = a.CompareTo(b) <= 0 ? a : b;
+        var right = a.CompareTo(b) <= 0 ? b : a;
+        return $"dm:{left:N}:{right:N}";
+    }
+
+    private static string Slugify(string name)
+    {
+        var chars = name.Trim().ToLowerInvariant()
+            .Select(ch => char.IsLetterOrDigit(ch) ? ch : (ch is ' ' or '_' ? '-' : '\0'))
+            .Where(ch => ch != '\0')
+            .ToArray();
+        var slug = new string(chars);
+        while (slug.Contains("--")) slug = slug.Replace("--", "-");
+        return slug.Trim('-');
     }
 
     private static string Truncate(string value, int max) =>
         value.Length <= max ? value : value[..(max - 1)] + "…";
 
-    private static ImChannelDTO MapChannel(ImChannelEntity c) => new()
+    private static bool IsUnavailable(Exception ex) =>
+        ex is HttpRequestException or IOException or TimeoutException
+        || ex.InnerException is HttpRequestException or IOException or SocketException;
+
+    private static ImChannelDTO MapChannel(ImChannelEntity c, int memberCount, ImMessageEntity? last = null) => new()
     {
         Id = c.Id,
         Name = c.Name,
         ChannelType = c.ChannelType,
-        CreatedAt = c.CreatedAt
+        Topic = c.Topic ?? "",
+        MemberCount = string.Equals(c.ChannelType, "dm", StringComparison.OrdinalIgnoreCase) ? 2 : memberCount,
+        CreatedAt = c.CreatedAt,
+        LastMessageBody = last?.Body,
+        LastMessageAt = last?.CreatedAt,
+        LastSenderName = last?.SenderName,
+        LastSenderUserId = last?.SenderUserId
     };
 
     private static ImMessageDTO MapMessage(ImMessageEntity m) => new()
     {
         Id = m.Id,
         ChannelId = m.ChannelId,
+        ParentMessageId = m.ParentMessageId,
         SenderUserId = m.SenderUserId,
         SenderName = m.SenderName,
         Body = m.Body,
@@ -383,6 +589,7 @@ public interface IAssetService
 {
     Task<Response<List<AssetDTO>>> ListAsync(string tenantId);
     Task<Response<AssetDTO>> CreateAsync(string tenantId, SaveAssetDTO request);
+    Task<Response<AssetDTO>> UpdateAsync(string tenantId, Guid id, SaveAssetDTO request);
     Task<Response<AssetDTO>> AssignAsync(string tenantId, Guid id, AssignAssetDTO request);
     Task<Response<AssetDTO>> RetireAsync(string tenantId, Guid id);
     Task<Response<int>> SendRenewalRemindersAsync(string tenantId, int withinDays = 30);
@@ -429,6 +636,28 @@ public class AssetService : IAssetService
         };
         await _store.InsertAssetAsync(asset);
         return Response<AssetDTO>.SuccessResponse(Map(asset), "Asset created");
+    }
+
+    public async Task<Response<AssetDTO>> UpdateAsync(string tenantId, Guid id, SaveAssetDTO request)
+    {
+        var asset = await _store.GetAssetAsync(tenantId, id);
+        if (asset is null)
+            return Response<AssetDTO>.Fail("Asset not found");
+        if (string.IsNullOrWhiteSpace(request.Name))
+            return Response<AssetDTO>.Fail("Name is required");
+
+        var type = (request.AssetType ?? asset.AssetType ?? "hardware").Trim().ToLowerInvariant();
+        if (type is not ("hardware" or "license" or "other"))
+            type = string.IsNullOrWhiteSpace(asset.AssetType) ? "hardware" : asset.AssetType;
+
+        asset.Name = request.Name.Trim();
+        asset.AssetType = type;
+        asset.SerialOrKey = string.IsNullOrWhiteSpace(request.SerialOrKey) ? null : request.SerialOrKey.Trim();
+        asset.RenewalDate = request.RenewalDate;
+        asset.Notes = string.IsNullOrWhiteSpace(request.Notes) ? null : request.Notes.Trim();
+        asset.UpdatedAt = DateTime.UtcNow;
+        await _store.UpdateAssetAsync(asset);
+        return Response<AssetDTO>.SuccessResponse(Map(asset), "Asset updated");
     }
 
     public async Task<Response<AssetDTO>> AssignAsync(string tenantId, Guid id, AssignAssetDTO request)
@@ -512,6 +741,7 @@ public class AssetService : IAssetService
         AssignedUserId = a.AssignedUserId,
         AssignedUserName = a.AssignedUserName,
         RenewalDate = a.RenewalDate,
-        Notes = a.Notes
+        Notes = a.Notes,
+        CreatedAt = a.CreatedAt
     };
 }

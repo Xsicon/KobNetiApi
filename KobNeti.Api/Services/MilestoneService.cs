@@ -126,6 +126,7 @@ public class MilestoneService : IMilestoneService
             EventType = e.EventType,
             StartsAt = e.StartsAt,
             EndsAt = e.EndsAt,
+            Location = e.Location,
             SourceEntityType = e.SourceEntityType,
             SourceEntityId = e.SourceEntityId
         }).ToList();

@@ -63,9 +63,13 @@ public class SupportW6PlatformTests : IClassFixture<SupportApiFactory>
         {
             Title = "Standup",
             StartsAt = DateTime.UtcNow.AddHours(2),
-            EventType = "meeting"
+            EventType = "meeting",
+            Location = "Room A"
         });
         Assert.Equal(HttpStatusCode.OK, cal.StatusCode);
+        var listed = await agent.GetFromJsonAsync<Response<List<CalendarEventDTO>>>(
+            "api/Calendar/events", SupportApiFactory.JsonOptions);
+        Assert.Contains(listed!.Data!, e => e.Title == "Standup" && e.Location == "Room A");
 
         var remind = await agent.PostAsync("api/Calendar/reminders?withinHours=48", null);
         Assert.Equal(HttpStatusCode.OK, remind.StatusCode);

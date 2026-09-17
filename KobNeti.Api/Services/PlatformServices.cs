@@ -226,7 +226,33 @@ public class CalendarOpsService : ICalendarOpsService
     public async Task<Response<List<CalendarEventDTO>>> ListAsync(string tenantId)
     {
         var events = await _store.ListCalendarEventsAsync(tenantId);
-        return Response<List<CalendarEventDTO>>.SuccessResponse(events.Select(Map).ToList(), "Calendar loaded");
+        var mapped = events.Select(Map).ToList();
+        var milestones = await _store.ListMilestonesAsync(tenantId);
+        foreach (var milestone in milestones.Where(m => m.TargetDate.HasValue))
+        {
+            var already = mapped.Any(e =>
+                e.SourceEntityId == milestone.Id
+                && string.Equals(e.SourceEntityType, "eng_milestone", StringComparison.OrdinalIgnoreCase));
+            if (already)
+                continue;
+
+            var starts = milestone.TargetDate!.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+            mapped.Add(new CalendarEventDTO
+            {
+                Id = milestone.CalendarEventId ?? milestone.Id,
+                Title = $"Milestone: {milestone.Title}",
+                Description = milestone.Description,
+                EventType = "milestone",
+                StartsAt = starts,
+                EndsAt = starts.AddDays(1),
+                SourceEntityType = "eng_milestone",
+                SourceEntityId = milestone.Id
+            });
+        }
+
+        return Response<List<CalendarEventDTO>>.SuccessResponse(
+            mapped.OrderBy(e => e.StartsAt).ToList(),
+            "Calendar loaded");
     }
 
     public async Task<Response<CalendarEventDTO>> CreateAsync(string tenantId, CreateCalendarEventDTO request)
@@ -239,10 +265,17 @@ public class CalendarOpsService : ICalendarOpsService
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             Title = request.Title.Trim(),
-            Description = request.Description,
-            EventType = string.IsNullOrWhiteSpace(request.EventType) ? "meeting" : request.EventType.Trim().ToLowerInvariant(),
-            StartsAt = request.StartsAt.ToUniversalTime(),
-            EndsAt = request.EndsAt?.ToUniversalTime(),
+            Description = request.Description?.Trim(),
+            EventType = NormalizeType(request.EventType),
+            StartsAt = request.StartsAt.Kind == DateTimeKind.Unspecified
+                ? DateTime.SpecifyKind(request.StartsAt, DateTimeKind.Local).ToUniversalTime()
+                : request.StartsAt.ToUniversalTime(),
+            EndsAt = request.EndsAt.HasValue
+                ? (request.EndsAt.Value.Kind == DateTimeKind.Unspecified
+                    ? DateTime.SpecifyKind(request.EndsAt.Value, DateTimeKind.Local).ToUniversalTime()
+                    : request.EndsAt.Value.ToUniversalTime())
+                : null,
+            Location = string.IsNullOrWhiteSpace(request.Location) ? null : request.Location.Trim(),
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -278,9 +311,22 @@ public class CalendarOpsService : ICalendarOpsService
         EventType = e.EventType,
         StartsAt = e.StartsAt,
         EndsAt = e.EndsAt,
+        Location = e.Location,
         SourceEntityType = e.SourceEntityType,
         SourceEntityId = e.SourceEntityId
     };
+
+    private static string NormalizeType(string? raw)
+    {
+        var value = (raw ?? "").Trim().ToLowerInvariant();
+        return value switch
+        {
+            "milestone" => "milestone",
+            "personal" or "reminder" => "reminder",
+            "other" => "other",
+            _ => "meeting"
+        };
+    }
 }
 
 public interface IOpsFileService
@@ -295,13 +341,15 @@ public interface IOpsFileService
         Stream content,
         long length,
         Guid? userId,
-        string? userName);
+        string? userName,
+        string? access = null);
+    Task<Response<OpsFileDTO>> UpdateAccessAsync(string tenantId, Guid id, string access);
     Task<Response<object>> DeleteAsync(string tenantId, Guid id);
 }
 
 public class OpsFileService : IOpsFileService
 {
-    private const long MaxUploadBytes = 25 * 1024 * 1024;
+    private const long MaxUploadBytes = 50 * 1024 * 1024;
 
     private readonly ISupportStore _store;
     private readonly ISupabaseStorageUploader _storage;
@@ -315,7 +363,10 @@ public class OpsFileService : IOpsFileService
     public async Task<Response<List<OpsFileDTO>>> ListAsync(string tenantId, string? folderPath)
     {
         var files = await _store.ListOpsFilesAsync(tenantId, folderPath);
-        return Response<List<OpsFileDTO>>.SuccessResponse(files.Select(Map).ToList(), "Files loaded");
+        var versions = VersionMap(files);
+        return Response<List<OpsFileDTO>>.SuccessResponse(
+            files.Select(f => Map(f, versions.GetValueOrDefault(f.Id, 1))).ToList(),
+            "Files loaded");
     }
 
     public async Task<Response<OpsFileDTO>> CreateAsync(
@@ -337,12 +388,13 @@ public class OpsFileService : IOpsFileService
             SizeBytes = request.SizeBytes,
             StoragePath = storagePath,
             PublicUrl = request.PublicUrl,
+            Access = NormalizeAccess(request.Access),
             CreatedBy = userId,
             CreatedByName = userName,
             CreatedAt = DateTime.UtcNow
         };
         await _store.InsertOpsFileAsync(file);
-        return Response<OpsFileDTO>.SuccessResponse(Map(file), "File registered (metadata only)");
+        return Response<OpsFileDTO>.SuccessResponse(Map(file, await NextVersionAsync(tenantId, folder, request.FileName.Trim())), "File registered (metadata only)");
     }
 
     public async Task<Response<OpsFileDTO>> UploadAsync(
@@ -353,14 +405,15 @@ public class OpsFileService : IOpsFileService
         Stream content,
         long length,
         Guid? userId,
-        string? userName)
+        string? userName,
+        string? access = null)
     {
         if (string.IsNullOrWhiteSpace(fileName))
             return Response<OpsFileDTO>.Fail("File name is required");
         if (length <= 0)
             return Response<OpsFileDTO>.Fail("File is empty");
         if (length > MaxUploadBytes)
-            return Response<OpsFileDTO>.Fail("File must be 25 MB or less");
+            return Response<OpsFileDTO>.Fail("File must be 50 MB or less");
 
         var folder = NormalizeFolder(folderPath);
         var id = Guid.NewGuid();
@@ -392,12 +445,24 @@ public class OpsFileService : IOpsFileService
             SizeBytes = length,
             StoragePath = objectKey,
             PublicUrl = publicUrl,
+            Access = NormalizeAccess(access),
             CreatedBy = userId,
             CreatedByName = userName,
             CreatedAt = DateTime.UtcNow
         };
         await _store.InsertOpsFileAsync(file);
-        return Response<OpsFileDTO>.SuccessResponse(Map(file), message);
+        return Response<OpsFileDTO>.SuccessResponse(Map(file, await NextVersionAsync(tenantId, folder, safeName)), message);
+    }
+
+    public async Task<Response<OpsFileDTO>> UpdateAccessAsync(string tenantId, Guid id, string access)
+    {
+        var file = await _store.GetOpsFileAsync(tenantId, id);
+        if (file is null)
+            return Response<OpsFileDTO>.Fail("File not found");
+        file.Access = NormalizeAccess(access);
+        await _store.UpdateOpsFileAsync(file);
+        var versions = VersionMap(await _store.ListOpsFilesAsync(tenantId, null));
+        return Response<OpsFileDTO>.SuccessResponse(Map(file, versions.GetValueOrDefault(file.Id, 1)), "Access updated");
     }
 
     public async Task<Response<object>> DeleteAsync(string tenantId, Guid id)
@@ -425,7 +490,28 @@ public class OpsFileService : IOpsFileService
         return string.Join('/', parts);
     }
 
-    private static OpsFileDTO Map(OpsFileEntity f) => new()
+    private async Task<int> NextVersionAsync(string tenantId, string folder, string fileName)
+    {
+        var files = await _store.ListOpsFilesAsync(tenantId, folder);
+        return files.Count(f => string.Equals(f.FileName, fileName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static Dictionary<Guid, int> VersionMap(IEnumerable<OpsFileEntity> files)
+    {
+        var map = new Dictionary<Guid, int>();
+        foreach (var group in files.GroupBy(f => $"{f.FolderPath}|{f.FileName}", StringComparer.OrdinalIgnoreCase))
+        {
+            var ordered = group.OrderBy(f => f.CreatedAt).ToList();
+            for (var i = 0; i < ordered.Count; i++)
+                map[ordered[i].Id] = i + 1;
+        }
+        return map;
+    }
+
+    private static string NormalizeAccess(string? access) =>
+        string.Equals(access, "public", StringComparison.OrdinalIgnoreCase) ? "public" : "restricted";
+
+    private static OpsFileDTO Map(OpsFileEntity f, int version = 1) => new()
     {
         Id = f.Id,
         FolderPath = f.FolderPath,
@@ -434,8 +520,11 @@ public class OpsFileService : IOpsFileService
         SizeBytes = f.SizeBytes,
         StoragePath = f.StoragePath,
         PublicUrl = f.PublicUrl,
+        CreatedBy = f.CreatedBy,
         CreatedByName = f.CreatedByName,
-        CreatedAt = f.CreatedAt
+        CreatedAt = f.CreatedAt,
+        Access = NormalizeAccess(f.Access),
+        Version = version
     };
 }
 

@@ -123,11 +123,12 @@ public class OpsFilesController : ApiControllerBase
 
     [HttpPost("upload")]
     [Consumes("multipart/form-data")]
-    [RequestSizeLimit(26_214_400)]
-    [RequestFormLimits(MultipartBodyLengthLimit = 26_214_400)]
+    [RequestSizeLimit(52_428_800)]
+    [RequestFormLimits(MultipartBodyLengthLimit = 52_428_800)]
     public async Task<ActionResult<Response<OpsFileDTO>>> Upload(
         IFormFile file,
-        [FromForm] string? folder = "/")
+        [FromForm] string? folder = "/",
+        [FromForm] string? access = "restricted")
     {
         if (file is null || file.Length == 0)
             return BadRequest(Response<OpsFileDTO>.Fail("File is required"));
@@ -140,8 +141,14 @@ public class OpsFilesController : ApiControllerBase
             stream,
             file.Length,
             AdminRoleClaims.GetUserId(User),
-            AdminRoleClaims.GetDisplayName(User)));
+            AdminRoleClaims.GetDisplayName(User),
+            access));
     }
+
+    [HttpPatch("{id:guid}/access")]
+    public async Task<ActionResult<Response<OpsFileDTO>>> UpdateAccess(
+        Guid id, [FromBody] UpdateOpsFileAccessDTO request) =>
+        HandleResponse(await _files.UpdateAccessAsync(RequireTenantId(_tenant), id, request.Access));
 
     [HttpDelete("{id:guid}")]
     public async Task<ActionResult<Response<object>>> Delete(Guid id) =>

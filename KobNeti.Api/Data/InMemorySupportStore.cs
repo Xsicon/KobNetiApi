@@ -676,11 +676,24 @@ public class InMemorySupportStore : ISupportStore
         return Task.CompletedTask;
     }
 
+    public Task UpdateOpsFileAsync(OpsFileEntity file)
+    {
+        if (_opsFiles.TryGetValue(file.Id, out var existing) && existing.TenantId == file.TenantId)
+            _opsFiles[file.Id] = Clone(file);
+        return Task.CompletedTask;
+    }
+
     public Task DeleteOpsFileAsync(string tenantId, Guid id)
     {
         if (_opsFiles.TryGetValue(id, out var f) && f.TenantId == tenantId)
             _opsFiles.TryRemove(id, out _);
         return Task.CompletedTask;
+    }
+
+    public Task<OpsFileEntity?> GetOpsFileAsync(string tenantId, Guid id)
+    {
+        _opsFiles.TryGetValue(id, out var f);
+        return Task.FromResult(f is not null && f.TenantId == tenantId ? Clone(f) : null);
     }
 
     public Task<List<OpsFileEntity>> ListOpsFilesAsync(string tenantId, string? folderPath)
@@ -814,6 +827,15 @@ public class InMemorySupportStore : ISupportStore
         return Task.FromResult(c is not null && c.TenantId == tenantId ? Clone(c) : null);
     }
 
+    public Task<ImChannelEntity?> GetImChannelByNameAsync(string tenantId, string name, string channelType)
+    {
+        var hit = _imChannels.Values.FirstOrDefault(c =>
+            c.TenantId == tenantId
+            && string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(c.ChannelType, channelType, StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(hit is null ? null : Clone(hit));
+    }
+
     public Task<List<ImChannelEntity>> ListImChannelsAsync(string tenantId) =>
         Task.FromResult(_imChannels.Values
             .Where(c => c.TenantId == tenantId)
@@ -831,6 +853,13 @@ public class InMemorySupportStore : ISupportStore
         Task.FromResult(_imMessages.Values
             .Where(m => m.TenantId == tenantId && m.ChannelId == channelId)
             .OrderBy(m => m.CreatedAt)
+            .Select(Clone)
+            .ToList());
+
+    public Task<List<ImMessageEntity>> ListImMessagesForTenantAsync(string tenantId) =>
+        Task.FromResult(_imMessages.Values
+            .Where(m => m.TenantId == tenantId)
+            .OrderByDescending(m => m.CreatedAt)
             .Select(Clone)
             .ToList());
 

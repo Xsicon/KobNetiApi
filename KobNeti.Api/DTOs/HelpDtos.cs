@@ -278,6 +278,23 @@ public class ProductDTO
     public string? GithubRepoUrl { get; set; }
     public List<ProductRepoDTO> LinkedRepos { get; set; } = [];
     public bool Enabled { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+public class CreateProductDTO
+{
+    public string DisplayName { get; set; } = string.Empty;
+    public string Slug { get; set; } = string.Empty;
+    public string ProductType { get; set; } = "saas_app";
+    public string SupportTier { get; set; } = "standard";
+}
+
+public class UpdateProductCatalogDTO
+{
+    public string? DisplayName { get; set; }
+    public string? ProductType { get; set; }
+    public string? Status { get; set; }
+    public string? SupportTier { get; set; }
 }
 
 public class ProductRepoDTO
@@ -286,6 +303,8 @@ public class ProductRepoDTO
     public string RepoKind { get; set; } = ProductRepoKinds.WebApp;
     public string Title { get; set; } = string.Empty;
     public string GithubRepoUrl { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
 }
 
 public class UpsertProductRepoDTO

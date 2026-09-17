@@ -1,5 +1,7 @@
 using KobNeti.Api.DTOs;
 using KobNeti.Api.Products;
+using System.Net.Http;
+using System.Net.Sockets;
 using static Postgrest.Constants;
 
 namespace KobNeti.Api.Data;
@@ -956,12 +958,30 @@ public class SupabaseSupportStore : ISupportStore
     public async Task InsertOpsFileAsync(OpsFileEntity file) =>
         await _client.From<SbOpsFile>().Insert(ToSb(file));
 
+    public async Task UpdateOpsFileAsync(OpsFileEntity file)
+    {
+        await _client.From<SbOpsFile>()
+            .Filter("tenant_id", Operator.Equals, file.TenantId)
+            .Filter("id", Operator.Equals, file.Id.ToString())
+            .Update(ToSb(file));
+    }
+
     public async Task DeleteOpsFileAsync(string tenantId, Guid id)
     {
         await _client.From<SbOpsFile>()
             .Filter("tenant_id", Operator.Equals, tenantId)
             .Filter("id", Operator.Equals, id.ToString())
             .Delete();
+    }
+
+    public async Task<OpsFileEntity?> GetOpsFileAsync(string tenantId, Guid id)
+    {
+        var response = await _client.From<SbOpsFile>()
+            .Filter("tenant_id", Operator.Equals, tenantId)
+            .Filter("id", Operator.Equals, id.ToString())
+            .Get();
+        var model = (response.Models ?? []).FirstOrDefault();
+        return model is null ? null : ToEntity(model);
     }
 
     public async Task<List<OpsFileEntity>> ListOpsFilesAsync(string tenantId, string? folderPath)
@@ -1105,20 +1125,34 @@ public class SupabaseSupportStore : ISupportStore
 
     public async Task<ImChannelEntity?> GetImChannelAsync(string tenantId, Guid id)
     {
-        var response = await _client.From<SbImChannel>()
-            .Filter("tenant_id", Operator.Equals, tenantId)
-            .Filter("id", Operator.Equals, id.ToString())
-            .Get();
+        var response = await RetryTransientAsync(() =>
+            _client.From<SbImChannel>()
+                .Filter("tenant_id", Operator.Equals, tenantId)
+                .Filter("id", Operator.Equals, id.ToString())
+                .Get());
+        var model = (response.Models ?? []).FirstOrDefault();
+        return model is null ? null : ToEntity(model);
+    }
+
+    public async Task<ImChannelEntity?> GetImChannelByNameAsync(string tenantId, string name, string channelType)
+    {
+        var response = await RetryTransientAsync(() =>
+            _client.From<SbImChannel>()
+                .Filter("tenant_id", Operator.Equals, tenantId)
+                .Filter("name", Operator.Equals, name)
+                .Filter("channel_type", Operator.Equals, channelType)
+                .Get());
         var model = (response.Models ?? []).FirstOrDefault();
         return model is null ? null : ToEntity(model);
     }
 
     public async Task<List<ImChannelEntity>> ListImChannelsAsync(string tenantId)
     {
-        var response = await _client.From<SbImChannel>()
-            .Filter("tenant_id", Operator.Equals, tenantId)
-            .Order("name", Ordering.Ascending)
-            .Get();
+        var response = await RetryTransientAsync(() =>
+            _client.From<SbImChannel>()
+                .Filter("tenant_id", Operator.Equals, tenantId)
+                .Order("name", Ordering.Ascending)
+                .Get());
         return (response.Models ?? []).Select(ToEntity).ToList();
     }
 
@@ -1127,11 +1161,22 @@ public class SupabaseSupportStore : ISupportStore
 
     public async Task<List<ImMessageEntity>> ListImMessagesAsync(string tenantId, Guid channelId)
     {
-        var response = await _client.From<SbImMessage>()
-            .Filter("tenant_id", Operator.Equals, tenantId)
-            .Filter("channel_id", Operator.Equals, channelId.ToString())
-            .Order("created_at", Ordering.Ascending)
-            .Get();
+        var response = await RetryTransientAsync(() =>
+            _client.From<SbImMessage>()
+                .Filter("tenant_id", Operator.Equals, tenantId)
+                .Filter("channel_id", Operator.Equals, channelId.ToString())
+                .Order("created_at", Ordering.Ascending)
+                .Get());
+        return (response.Models ?? []).Select(ToEntity).ToList();
+    }
+
+    public async Task<List<ImMessageEntity>> ListImMessagesForTenantAsync(string tenantId)
+    {
+        var response = await RetryTransientAsync(() =>
+            _client.From<SbImMessage>()
+                .Filter("tenant_id", Operator.Equals, tenantId)
+                .Order("created_at", Ordering.Descending)
+                .Get());
         return (response.Models ?? []).Select(ToEntity).ToList();
     }
 
@@ -1663,6 +1708,7 @@ public class SupabaseSupportStore : ISupportStore
         EventType = m.EventType,
         StartsAt = m.StartsAt,
         EndsAt = m.EndsAt,
+        Location = m.Location,
         SourceEntityType = m.SourceEntityType,
         SourceEntityId = m.SourceEntityId,
         CreatedAt = m.CreatedAt,
@@ -1678,6 +1724,7 @@ public class SupabaseSupportStore : ISupportStore
         EventType = e.EventType,
         StartsAt = e.StartsAt,
         EndsAt = e.EndsAt,
+        Location = e.Location,
         SourceEntityType = e.SourceEntityType,
         SourceEntityId = e.SourceEntityId,
         CreatedAt = e.CreatedAt,
@@ -1900,14 +1947,19 @@ public class SupabaseSupportStore : ISupportStore
     {
         Id = m.Id, TenantId = m.TenantId, FolderPath = m.FolderPath, FileName = m.FileName,
         ContentType = m.ContentType, SizeBytes = m.SizeBytes, StoragePath = m.StoragePath,
-        PublicUrl = m.PublicUrl, CreatedBy = m.CreatedBy, CreatedByName = m.CreatedByName, CreatedAt = m.CreatedAt
+        PublicUrl = m.PublicUrl, CreatedBy = m.CreatedBy, CreatedByName = m.CreatedByName,
+        CreatedAt = m.CreatedAt, Access = NormalizeAccess(m.Access)
     };
     private static SbOpsFile ToSb(OpsFileEntity e) => new()
     {
         Id = e.Id, TenantId = e.TenantId, FolderPath = e.FolderPath, FileName = e.FileName,
         ContentType = e.ContentType, SizeBytes = e.SizeBytes, StoragePath = e.StoragePath,
-        PublicUrl = e.PublicUrl, CreatedBy = e.CreatedBy, CreatedByName = e.CreatedByName, CreatedAt = e.CreatedAt
+        PublicUrl = e.PublicUrl, CreatedBy = e.CreatedBy, CreatedByName = e.CreatedByName,
+        CreatedAt = e.CreatedAt, Access = NormalizeAccess(e.Access)
     };
+
+    private static string NormalizeAccess(string? access) =>
+        string.Equals(access, "public", StringComparison.OrdinalIgnoreCase) ? "public" : "restricted";
 
     private static IntegrationEntity ToEntity(SbIntegration m) => new()
     {
@@ -1936,12 +1988,14 @@ public class SupabaseSupportStore : ISupportStore
     private static PlatformHelpArticleEntity ToEntity(SbPlatformHelp m) => new()
     {
         Id = m.Id, Slug = m.Slug, Title = m.Title, Body = m.Body, Category = m.Category,
-        Status = m.Status, SortOrder = m.SortOrder, CreatedAt = m.CreatedAt, UpdatedAt = m.UpdatedAt
+        Status = m.Status, SortOrder = m.SortOrder, VideoUrl = m.VideoUrl,
+        CreatedAt = m.CreatedAt, UpdatedAt = m.UpdatedAt
     };
     private static SbPlatformHelp ToSb(PlatformHelpArticleEntity e) => new()
     {
         Id = e.Id, Slug = e.Slug, Title = e.Title, Body = e.Body, Category = e.Category,
-        Status = e.Status, SortOrder = e.SortOrder, CreatedAt = e.CreatedAt, UpdatedAt = e.UpdatedAt
+        Status = e.Status, SortOrder = e.SortOrder, VideoUrl = e.VideoUrl,
+        CreatedAt = e.CreatedAt, UpdatedAt = e.UpdatedAt
     };
 
     private static ReportRunEntity ToEntity(SbReportRun m) => new()
@@ -1960,23 +2014,23 @@ public class SupabaseSupportStore : ISupportStore
     private static ImChannelEntity ToEntity(SbImChannel m) => new()
     {
         Id = m.Id, TenantId = m.TenantId, Name = m.Name, ChannelType = m.ChannelType,
-        CreatedBy = m.CreatedBy, CreatedAt = m.CreatedAt
+        Topic = m.Topic ?? "", CreatedBy = m.CreatedBy, CreatedAt = m.CreatedAt
     };
     private static SbImChannel ToSb(ImChannelEntity e) => new()
     {
         Id = e.Id, TenantId = e.TenantId, Name = e.Name, ChannelType = e.ChannelType,
-        CreatedBy = e.CreatedBy, CreatedAt = e.CreatedAt
+        Topic = e.Topic ?? "", CreatedBy = e.CreatedBy, CreatedAt = e.CreatedAt
     };
 
     private static ImMessageEntity ToEntity(SbImMessage m) => new()
     {
-        Id = m.Id, TenantId = m.TenantId, ChannelId = m.ChannelId, SenderUserId = m.SenderUserId,
-        SenderName = m.SenderName, Body = m.Body, CreatedAt = m.CreatedAt
+        Id = m.Id, TenantId = m.TenantId, ChannelId = m.ChannelId, ParentMessageId = m.ParentMessageId,
+        SenderUserId = m.SenderUserId, SenderName = m.SenderName, Body = m.Body, CreatedAt = m.CreatedAt
     };
     private static SbImMessage ToSb(ImMessageEntity e) => new()
     {
-        Id = e.Id, TenantId = e.TenantId, ChannelId = e.ChannelId, SenderUserId = e.SenderUserId,
-        SenderName = e.SenderName, Body = e.Body, CreatedAt = e.CreatedAt
+        Id = e.Id, TenantId = e.TenantId, ChannelId = e.ChannelId, ParentMessageId = e.ParentMessageId,
+        SenderUserId = e.SenderUserId, SenderName = e.SenderName, Body = e.Body, CreatedAt = e.CreatedAt
     };
 
     private static AssetEntity ToEntity(SbAsset m) => new()
@@ -2013,4 +2067,21 @@ public class SupabaseSupportStore : ISupportStore
         return text.Contains("42703", StringComparison.OrdinalIgnoreCase)
                && text.Contains("repo_key", StringComparison.OrdinalIgnoreCase);
     }
+
+    private static async Task<T> RetryTransientAsync<T>(Func<Task<T>> action)
+    {
+        try
+        {
+            return await action();
+        }
+        catch (Exception ex) when (IsTransient(ex))
+        {
+            await Task.Delay(200);
+            return await action();
+        }
+    }
+
+    private static bool IsTransient(Exception ex) =>
+        ex is HttpRequestException or IOException or SocketException or TimeoutException
+        || ex.InnerException is HttpRequestException or IOException or SocketException;
 }

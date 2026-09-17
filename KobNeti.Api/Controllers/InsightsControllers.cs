@@ -82,6 +82,19 @@ public class PlatformHelpController : ApiControllerBase
     [Authorize(Policy = AdminAuthorizationPolicies.PlatformAdmin)]
     public async Task<ActionResult<Response<PlatformHelpArticleDTO>>> Upsert([FromBody] SavePlatformHelpDTO request) =>
         HandleResponse(await _help.UpsertAsync(request));
+
+    [HttpPost("video")]
+    [Authorize(Policy = AdminAuthorizationPolicies.PlatformAdmin)]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(52_428_800)]
+    [RequestFormLimits(MultipartBodyLengthLimit = 52_428_800)]
+    public async Task<ActionResult<Response<PlatformHelpVideoDTO>>> UploadVideo(IFormFile file)
+    {
+        if (file is null || file.Length == 0)
+            return BadRequest(Response<PlatformHelpVideoDTO>.Fail("Video file is required"));
+        await using var stream = file.OpenReadStream();
+        return HandleResponse(await _help.UploadVideoAsync(file.FileName, file.ContentType, stream, file.Length));
+    }
 }
 
 [Route("api/InternalChat")]
@@ -105,6 +118,14 @@ public class InternalChatController : ApiControllerBase
     public async Task<ActionResult<Response<ImChannelDTO>>> CreateChannel([FromBody] CreateImChannelDTO request) =>
         HandleResponse(await _chat.CreateChannelAsync(
             RequireTenantId(_tenant), request, AdminRoleClaims.GetUserId(User)));
+
+    [HttpPost("dms")]
+    public async Task<ActionResult<Response<ImChannelDTO>>> OpenDm([FromBody] OpenImDmDTO request) =>
+        HandleResponse(await _chat.OpenDmAsync(
+            RequireTenantId(_tenant),
+            request,
+            AdminRoleClaims.GetUserId(User),
+            AdminRoleClaims.GetDisplayName(User)));
 
     [HttpGet("channels/{id:guid}/messages")]
     public async Task<ActionResult<Response<List<ImMessageDTO>>>> Messages(Guid id) =>
@@ -138,6 +159,10 @@ public class AssetsController : ApiControllerBase
     [HttpPost]
     public async Task<ActionResult<Response<AssetDTO>>> Create([FromBody] SaveAssetDTO request) =>
         HandleResponse(await _assets.CreateAsync(RequireTenantId(_tenant), request));
+
+    [HttpPut("{id:guid}")]
+    public async Task<ActionResult<Response<AssetDTO>>> Update(Guid id, [FromBody] SaveAssetDTO request) =>
+        HandleResponse(await _assets.UpdateAsync(RequireTenantId(_tenant), id, request));
 
     [HttpPost("{id:guid}/assign")]
     public async Task<ActionResult<Response<AssetDTO>>> Assign(Guid id, [FromBody] AssignAssetDTO request) =>

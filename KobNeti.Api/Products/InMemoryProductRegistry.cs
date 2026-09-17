@@ -45,6 +45,15 @@ public class InMemoryProductRegistry : IProductRegistry
         }
     }
 
+    public Task<IReadOnlyList<ProductRecord>> ListAllAsync(CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            return Task.FromResult<IReadOnlyList<ProductRecord>>(
+                _products.Select(p => Clone(p)!).ToList());
+        }
+    }
+
     public Task<ProductRecord?> GetBySlugAsync(string slug, CancellationToken ct = default)
     {
         lock (_gate)
@@ -106,6 +115,51 @@ public class InMemoryProductRegistry : IProductRegistry
             hit.UpstreamApiBaseUrl = string.IsNullOrWhiteSpace(upstreamApiBaseUrl)
                 ? null
                 : upstreamApiBaseUrl.Trim().TrimEnd('/');
+            hit.UpdatedAt = DateTime.UtcNow;
+            return Task.FromResult(Clone(hit));
+        }
+    }
+
+    public Task<ProductRecord?> CreateAsync(ProductRecord product, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            if (_products.Any(p => string.Equals(p.Slug, product.Slug, StringComparison.OrdinalIgnoreCase)))
+                return Task.FromResult<ProductRecord?>(null);
+
+            var now = DateTime.UtcNow;
+            var created = Clone(product)!;
+            created.Id = created.Id == Guid.Empty ? Guid.NewGuid() : created.Id;
+            created.CreatedAt = now;
+            created.UpdatedAt = now;
+            created.Enabled = true;
+            if (string.IsNullOrWhiteSpace(created.PublicKey))
+                created.PublicKey = EmbedKeyHelper.GeneratePublicKey(created.Slug);
+            _products.Add(created);
+            return Task.FromResult<ProductRecord?>(Clone(created));
+        }
+    }
+
+    public Task<ProductRecord?> UpdateCatalogAsync(string slug, ProductRecord patch, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            var hit = _products.FirstOrDefault(p =>
+                string.Equals(p.Slug, slug, StringComparison.OrdinalIgnoreCase));
+            if (hit is null)
+                return Task.FromResult<ProductRecord?>(null);
+
+            if (!string.IsNullOrWhiteSpace(patch.DisplayName))
+                hit.DisplayName = patch.DisplayName.Trim();
+            if (!string.IsNullOrWhiteSpace(patch.ProductType))
+                hit.ProductType = patch.ProductType;
+            if (!string.IsNullOrWhiteSpace(patch.Status))
+            {
+                hit.Status = patch.Status;
+                hit.Enabled = !string.Equals(patch.Status, "deprecated", StringComparison.OrdinalIgnoreCase);
+            }
+            if (!string.IsNullOrWhiteSpace(patch.SupportTier))
+                hit.SupportTier = patch.SupportTier;
             hit.UpdatedAt = DateTime.UtcNow;
             return Task.FromResult(Clone(hit));
         }

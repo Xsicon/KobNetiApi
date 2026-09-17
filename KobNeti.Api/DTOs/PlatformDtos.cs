@@ -45,6 +45,7 @@ public class CreateCalendarEventDTO
     public string EventType { get; set; } = "meeting";
     public DateTime StartsAt { get; set; }
     public DateTime? EndsAt { get; set; }
+    public string? Location { get; set; }
 }
 
 public class OpsFileDTO
@@ -56,8 +57,11 @@ public class OpsFileDTO
     public long? SizeBytes { get; set; }
     public string StoragePath { get; set; } = string.Empty;
     public string? PublicUrl { get; set; }
+    public Guid? CreatedBy { get; set; }
     public string? CreatedByName { get; set; }
     public DateTime CreatedAt { get; set; }
+    public string Access { get; set; } = "restricted";
+    public int Version { get; set; } = 1;
 }
 
 public class CreateOpsFileDTO
@@ -67,6 +71,12 @@ public class CreateOpsFileDTO
     public string? ContentType { get; set; }
     public long? SizeBytes { get; set; }
     public string? PublicUrl { get; set; }
+    public string? Access { get; set; }
+}
+
+public class UpdateOpsFileAccessDTO
+{
+    public string Access { get; set; } = "restricted";
 }
 
 public class IntegrationDTO

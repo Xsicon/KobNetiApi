@@ -70,6 +70,27 @@ public class SupabaseProductRegistry : IProductRegistry
         }
     }
 
+    public async Task<IReadOnlyList<ProductRecord>> ListAllAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var response = await _client.From<SbProduct>()
+                .Order("display_name", Ordering.Ascending)
+                .Get();
+
+            var rows = (response.Models ?? []).Select(ToRecord).ToList();
+            if (rows.Count == 0)
+                return await _configFallback.ListAllAsync(ct);
+
+            return await MergeConfigTenantsAsync(OverlayConfigSecrets(rows).ToList(), ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Product registry ListAll failed; using config tenants.");
+            return await _configFallback.ListAllAsync(ct);
+        }
+    }
+
     public async Task<ProductRecord?> GetBySlugAsync(string slug, CancellationToken ct = default)
     {
         try
@@ -195,6 +216,72 @@ public class SupabaseProductRegistry : IProductRegistry
         {
             _logger.LogWarning(ex, "Product registry UpdateUpstreamApiBaseUrl failed for {Slug}", slug);
             return await _configFallback.UpdateUpstreamApiBaseUrlAsync(slug, upstreamApiBaseUrl, ct);
+        }
+    }
+
+    public async Task<ProductRecord?> CreateAsync(ProductRecord product, CancellationToken ct = default)
+    {
+        try
+        {
+            var now = DateTime.UtcNow;
+            var row = new SbProduct
+            {
+                Id = product.Id == Guid.Empty ? Guid.NewGuid() : product.Id,
+                Slug = product.Slug.Trim().ToLowerInvariant(),
+                DisplayName = product.DisplayName.Trim(),
+                ProductType = product.ProductType,
+                Status = string.IsNullOrWhiteSpace(product.Status) ? "active" : product.Status,
+                SupportTier = product.SupportTier,
+                PublicKey = string.IsNullOrWhiteSpace(product.PublicKey)
+                    ? EmbedKeyHelper.GeneratePublicKey(product.Slug)
+                    : product.PublicKey,
+                Enabled = true,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            var response = await _client.From<SbProduct>().Insert(row);
+            var saved = (response.Models ?? []).FirstOrDefault() ?? row;
+            return OverlayConfigSecrets([ToRecord(saved)]).First();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Product registry Create failed for {Slug}", product.Slug);
+            return await _configFallback.CreateAsync(product, ct);
+        }
+    }
+
+    public async Task<ProductRecord?> UpdateCatalogAsync(string slug, ProductRecord patch, CancellationToken ct = default)
+    {
+        try
+        {
+            var response = await _client.From<SbProduct>()
+                .Filter("slug", Operator.Equals, slug)
+                .Get();
+            var row = (response.Models ?? []).FirstOrDefault();
+            if (row is null)
+                return await _configFallback.UpdateCatalogAsync(slug, patch, ct);
+
+            if (!string.IsNullOrWhiteSpace(patch.DisplayName))
+                row.DisplayName = patch.DisplayName.Trim();
+            if (!string.IsNullOrWhiteSpace(patch.ProductType))
+                row.ProductType = patch.ProductType;
+            if (!string.IsNullOrWhiteSpace(patch.Status))
+            {
+                row.Status = patch.Status;
+                row.Enabled = !string.Equals(patch.Status, "deprecated", StringComparison.OrdinalIgnoreCase);
+            }
+            if (!string.IsNullOrWhiteSpace(patch.SupportTier))
+                row.SupportTier = patch.SupportTier;
+            row.UpdatedAt = DateTime.UtcNow;
+            await _client.From<SbProduct>()
+                .Filter("id", Operator.Equals, row.Id.ToString())
+                .Update(row);
+            return OverlayConfigSecrets([ToRecord(row)]).First();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Product registry UpdateCatalog failed for {Slug}", slug);
+            return await _configFallback.UpdateCatalogAsync(slug, patch, ct);
         }
     }
 

@@ -96,6 +96,68 @@ public class SupportW7InsightsTests : IClassFixture<SupportApiFactory>
     }
 
     [Fact]
+    public async Task InternalChat_creates_general_channel_topic_threads_and_dms()
+    {
+        var token = SupportApiFactory.CreateAgentToken(SupportApiFactory.CoreSecret, StaffRoles.Admin);
+        var agent = _factory.CreateTenantClient(SupportApiFactory.TenantAKey, token);
+
+        var listed = await agent.GetFromJsonAsync<Response<List<ImChannelDTO>>>(
+            "api/InternalChat/channels", SupportApiFactory.JsonOptions);
+        Assert.True(listed!.Success);
+        Assert.Contains(listed.Data!, c =>
+            string.Equals(c.Name, "general", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(c.ChannelType, "channel", StringComparison.OrdinalIgnoreCase));
+
+        var create = await agent.PostAsJsonAsync("api/InternalChat/channels", new CreateImChannelDTO
+        {
+            Name = "QA Builds",
+            ChannelType = "channel",
+            Topic = "Quality Assurance & automated test execution"
+        });
+        Assert.Equal(HttpStatusCode.OK, create.StatusCode);
+        var channel = (await create.Content.ReadFromJsonAsync<Response<ImChannelDTO>>(SupportApiFactory.JsonOptions))!.Data!;
+        Assert.Equal("qa-builds", channel.Name);
+        Assert.Equal("Quality Assurance & automated test execution", channel.Topic);
+
+        var dup = await agent.PostAsJsonAsync("api/InternalChat/channels", new CreateImChannelDTO
+        {
+            Name = "qa-builds",
+            ChannelType = "channel"
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, dup.StatusCode);
+
+        var parentRes = await agent.PostAsJsonAsync($"api/InternalChat/channels/{channel.Id}/messages",
+            new SendImMessageDTO { Body = "Need sign-off on the checkout fix." });
+        Assert.Equal(HttpStatusCode.OK, parentRes.StatusCode);
+        var parent = (await parentRes.Content.ReadFromJsonAsync<Response<ImMessageDTO>>(SupportApiFactory.JsonOptions))!.Data!;
+
+        var replyRes = await agent.PostAsJsonAsync($"api/InternalChat/channels/{channel.Id}/messages",
+            new SendImMessageDTO { Body = "I'll re-run the suite after the fix.", ParentMessageId = parent.Id });
+        Assert.Equal(HttpStatusCode.OK, replyRes.StatusCode);
+        var reply = (await replyRes.Content.ReadFromJsonAsync<Response<ImMessageDTO>>(SupportApiFactory.JsonOptions))!.Data!;
+        Assert.Equal(parent.Id, reply.ParentMessageId);
+
+        var peer = Guid.NewGuid();
+        var dmRes = await agent.PostAsJsonAsync("api/InternalChat/dms", new OpenImDmDTO
+        {
+            UserId = peer,
+            DisplayName = "Teammate"
+        });
+        Assert.Equal(HttpStatusCode.OK, dmRes.StatusCode);
+        var dm = (await dmRes.Content.ReadFromJsonAsync<Response<ImChannelDTO>>(SupportApiFactory.JsonOptions))!.Data!;
+        Assert.Equal("dm", dm.ChannelType);
+        Assert.Equal(2, dm.MemberCount);
+
+        var again = await agent.PostAsJsonAsync("api/InternalChat/dms", new OpenImDmDTO
+        {
+            UserId = peer,
+            DisplayName = "Teammate"
+        });
+        var againBody = (await again.Content.ReadFromJsonAsync<Response<ImChannelDTO>>(SupportApiFactory.JsonOptions))!.Data!;
+        Assert.Equal(dm.Id, againBody.Id);
+    }
+
+    [Fact]
     public async Task TenantB_cannot_see_TenantA_assets_or_reports()
     {
         var tokenA = SupportApiFactory.CreateAgentToken(SupportApiFactory.CoreSecret, StaffRoles.Admin);
